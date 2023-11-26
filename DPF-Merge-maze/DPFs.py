@@ -29,52 +29,38 @@ class DPF_base(nn.Module):
     def __init__(self, args):
         super().__init__()
 
-    def forward(self, inputs, train=True, params=None, environment_data = None):
-        if params.dataset == 'disk':
-            (start_image, start_state, image, state, q, visible) = inputs
-            state = state.to(device)
-            start_state = start_state.to(device)
-            image = image.permute(0, 1, 4, 2, 3).to(device)
-            actions = state[:, :, 2:] + torch.normal(0.0, 4.0, (state[:, :, 2:]).shape).to(device)
-            environment_obs = None
-        elif params.dataset == 'maze':
-            (state, actions, image) = inputs
-            state = state.to(device)
-            start_state = state.clone()[:,0]
-            state = state.clone()[:,1:]
-            actions = actions.to(device)
-            image = image.permute(0, 1, 4, 2, 3).to(device)
-            image = image.clone()[:,1:]
+    def forward(self, t, slice_data_next, inputs, train=True, params=None, environment_data = None):
+        if params.dataset == 'maze':
+            if self.param.learnType == 'offline':
+                (state, actions, image) = inputs
+                state = state.to(device)
+                start_state = state.clone()[:,0]
+                state = state.clone()[:,1:]
+                actions = actions.to(device)
+                image = image.permute(0, 1, 4, 2, 3).to(device)
+                image = image.clone()[:,1:]
+
+            if self.param.learnType == 'online':
+                if t == 0:
+                    (start_state, state, actions, image) = inputs
+                else:
+                    (state, actions, image) = inputs
+                    start_state = slice_data_next[1]
+
             maps, statistics = environment_data
             (means, stds, state_step_sizes, state_mins, state_maxs) = statistics
             state_step_sizes = torch.tensor(state_step_sizes).to(device)
             environment_obs = (torch.tensor(means['o']).permute(0, 1, 4, 2, 3).to(device),
                                torch.tensor(stds['o']).permute(0, 1, 4, 2, 3).to(device))
-        elif params.dataset == 'house3d':
-            true_states, global_map, init_particles, observation, odometry, _ = inputs
-            state = torch.tensor(true_states).to(device)
-            state[..., -1] = wrap_angle(state[..., -1].clone())
-            state_mins = [state[..., i].min(dim=-1)[0] for i in range(state.shape[-1])]
-            state_maxs = [state[..., i].max(dim=-1)[0] for i in range(state.shape[-1])]
-            actions = state[:, 1:] - state[:, :-1]
-            statistics = state_mins, state_maxs
-            start_state = state.clone()[:,0]
-            state = state.clone()[:,1:]
-            # actions = torch.tensor(odometry).to(device)
-            image = torch.tensor(observation).to(device).permute(0, 1, 4, 2, 3)
-            image = image.clone()[:, 1:]
-
-            environment_data = global_map, statistics
-            environment_obs = None
         else:
             raise ValueError('Please select a dataset from {disk, maze, house3d}')
         self.seq_len = state.shape[1]
 
         # modify the dimension of hidden state
         # start_time = time.time()
-        elbo, particle_list, particle_weight_list, noise_list, likelihood_list, \
+        slice_data_current, elbo, particle_list, particle_weight_list, noise_list, likelihood_list, \
         init_weights_log, index_list, jac_list, prior_list, obs_likelihood = \
-            self.filtering_pos(image, start_state, actions, train=train, environment_data =environment_data)
+            self.filtering_pos(t, slice_data_next, image, start_state, actions, train=train, environment_data =environment_data)
         # end_time = time.time()
         # time_seconds = end_time - start_time
         # print(f"each forward took {time_seconds:.2f} seconds to run.")
@@ -84,7 +70,7 @@ class DPF_base(nn.Module):
         else:
             mask = 1.0
         if self.param.dataset == 'maze':
-            loss_alltime, loss_sup, loss_sup_last, predictions = supervised_loss(particle_list, particle_weight_list,
+            loss_alltime, loss_sup, loss_sup_last, predictions = supervised_loss(self.param.learnType, particle_list, particle_weight_list,
                                                                                  state, mask,
                                                                                  train,
                                                                                  labeledRatio=self.param.labeledRatio)
@@ -142,19 +128,18 @@ class DPF_base(nn.Module):
         else:
             raise ValueError('Please select the training type in DPF (supervised learning) and SDPF (semi-supervised learning)')
 
-        return elbo_value, loss_alltime, total_loss, loss_sup, loss_sup_last, loss_pseud_lik, loss_ae, predictions, particle_list, particle_weight_list, state, start_state, image, likelihood_list, noise_list, obs_likelihood
+        return slice_data_current, elbo_value, loss_alltime, total_loss, loss_sup, loss_sup_last, loss_pseud_lik, loss_ae, predictions, particle_list, particle_weight_list, state, start_state, image, likelihood_list, noise_list, obs_likelihood
 
-    def filtering_pos(self, obs, start_state_vs, actions, train = True, environment_data = None):
-        if self.param.dataset=='disk':
-            start_state = start_state_vs[:, :2]
-            start_action = start_state_vs[:, 2:]
-            batch_size = start_state.shape[0]
-            environment_measurement = None
-            environment_state = self.pos_noise
-        elif self.param.dataset=='maze':
+    def filtering_pos(self, t, slice_data_next, obs, start_state_vs, actions, train = True, environment_data = None):
+        if self.param.dataset=='maze':
             start_state = start_state_vs
-            start_action = actions[:, 0]
-            actions = actions[:, 1:]
+            if self.param.learnType == 'offline':
+                action = actions[:, 0]
+                actions = actions[:, 1:]
+            else:
+                actions = actions
+            # start_action = actions[:, 0]
+            # actions = actions[:, 1:]
             batch_size = start_state.shape[0]
 
             maps, statistics = environment_data
@@ -164,40 +149,29 @@ class DPF_base(nn.Module):
             environment_state = means, stds, state_step_sizes
             obs = (obs - torch.tensor(means['o']).permute(0, 1, 4, 2, 3).to(device)) / torch.tensor(
                 stds['o']).permute(0, 1, 4, 2, 3).to(device)  # shape: (batch, seq, 3, 24, 24)
-        elif self.param.dataset == 'house3d':
-            start_state = start_state_vs
-            start_action = actions[:, 0]
-            actions = actions[:, 1:]
-            batch_size = start_state.shape[0]
-            maps, statistics = environment_data
-            # encodings_maps = self.map_encoder(maps)
-            resize_length = 392
-            map_width_original = maps.shape[1]
-            map_height_original = maps.shape[2]
-            maps_resize = []
-            for i in range(maps.shape[0]):
-                maps_resize.append(resize(maps[i], (resize_length, resize_length)))
-            maps = np.array(maps_resize)
-            maps = torch.tensor(maps).to(device).permute(0, 3, 1, 2)
-
-            environment_measurement = maps, (map_width_original, map_height_original)
-            environment_state = self.std_x, self.std_y, self.std_t
         else:
             raise ValueError('Please select a dataset from {disk, maze, house3d}')
 
-        initial_particles, init_weights_log=particle_initialization(start_state, self.param, environment_data, train=train)
+        if t == 0 or self.param.learnType == 'offline':
+            initial_particles, init_weights_log=particle_initialization(start_state, self.param, environment_data, train=train)
 
-        initial_particle_probs = normalize_log_probs(init_weights_log)
-        obs_likelihood = 0.0
+            initial_particle_probs = normalize_log_probs(init_weights_log)
+            obs_likelihood = 0.0
 
-        particles = initial_particles
-        particle_probs = initial_particle_probs
-        unnormalize_weight_next = initial_particle_probs.log()
-        action = start_action
-        elbo = torch.zeros(unnormalize_weight_next.shape[0]).to(device)
+            particles = initial_particles
+            particle_probs = initial_particle_probs
+            unnormalize_weight_next = initial_particle_probs.log()
+            elbo = torch.zeros(unnormalize_weight_next.shape[0]).to(device)
+        else:
+            init_weights_log = None
+            obs_likelihood, particles, particle_probs, unnormalize_weight_next = slice_data_next
+            elbo = torch.zeros(unnormalize_weight_next.shape[0]).to(device)
+
         # filtering_start_time = time.time()
         for step in range(self.seq_len):
             # index_p shape: (batch, num_p)
+            if self.param.learnType == 'online':
+                action = actions[:, step: step+1, :].squeeze()
             index_p = (torch.arange(self.num_particle)+self.num_particle* torch.arange(batch_size)[:, None].repeat((1, self.num_particle))).type(torch.int64).to(device)
             ESS = torch.mean(1/torch.sum(particle_probs**2, dim=-1))
 
@@ -216,7 +190,9 @@ class DPF_base(nn.Module):
 
             unnormalize_weight_nu = torch.logsumexp(particle_probs_elbo, dim=1)
             particles_physic, noise = self.motion_update(particles_resampled, action, environment_state=environment_state)
-            action = actions[:, step: step+1, :].squeeze()
+            if self.param.learnType == 'offline':
+                action = actions[:, step: step+1, :].squeeze()
+            # action = actions[:, step: step+1, :].squeeze()
 
             particles_dynamic, jac = nf_dynamic_model(self.nf_dyn, particles_physic,particle_probs.shape, NF=self.NF)
 
@@ -285,7 +261,7 @@ class DPF_base(nn.Module):
         # elapsed_time = filtering_end_time - filtering_start_time
         #
         # print(f"filtering pos took {elapsed_time} seconds to run.")
-        return elbo, particle_list, particle_probs_list, noise_list, likelihood_list, init_weights_log, index_list, jac_list, prior_list, obs_likelihood
+        return [obs_likelihood, particles, particle_probs, unnormalize_weight_next], elbo, particle_list, particle_probs_list, noise_list, likelihood_list, init_weights_log, index_list, jac_list, prior_list, obs_likelihood
 
     def get_mask(self):
 
@@ -510,8 +486,8 @@ class DPF_base(nn.Module):
                         break
                     self.zero_grad()
                     # start_time = time.time()
-                    elbo_value, loss_alltime, loss_all, loss_sup, loss_sup_last, loss_pseud_lik, loss_ae, predictions, particle_list, particle_weight_list, state, start_state, image, likelihood_list, noise_list, obs_likelihood = self.forward(
-                        inputs, train=True, params=params, environment_data=environment_data)
+                    slice_data_current, elbo_value, loss_alltime, loss_all, loss_sup, loss_sup_last, loss_pseud_lik, loss_ae, predictions, particle_list, particle_weight_list, state, start_state, image, likelihood_list, noise_list, obs_likelihood = self.forward(
+                        None, None, inputs, train=True, params=params, environment_data=environment_data)
                     if loss_all != 0:
                         loss_all.backward()
                         self.optim.step()  # self.set_optim_step()
@@ -536,8 +512,8 @@ class DPF_base(nn.Module):
                             break
                         self.zero_grad()
 
-                        elbo_value, loss_alltime, loss_all, loss_sup, loss_sup_last, loss_pseud_lik, loss_ae, predictions, particle_list, particle_weight_list, state, start_state, image, likelihood_list, noise_list, obs_likelihood = self.forward(
-                            inputs, train=False, params=params, environment_data=environment_data)
+                        slice_data_current, elbo_value, loss_alltime, loss_all, loss_sup, loss_sup_last, loss_pseud_lik, loss_ae, predictions, particle_list, particle_weight_list, state, start_state, image, likelihood_list, noise_list, obs_likelihood = self.forward(
+                            None, None, inputs, train=False, params=params, environment_data=environment_data)
                         total_sup_eval_loss.append(loss_sup.detach().cpu().numpy())
                         total_sup_last_eval_loss.append(loss_sup_last.detach().cpu().numpy())
 
@@ -571,6 +547,7 @@ class DPF_base(nn.Module):
             np.save(os.path.join('logs', run_id, "data", 'eval_loss_std_epoch.npy'), eval_loss_std_epoch)
 
         if learnType == 'online':
+            slice_data_next = None
             for param in self.encoder.parameters():
                 param.requires_grad = False
             for param in self.decoder.parameters():
@@ -581,23 +558,37 @@ class DPF_base(nn.Module):
             total_sup_last_loss = []
             total_elbo = []
             total_ae_loss = []
+            loss_alltime_list = []
             for iteration, inputs in enumerate(tqdm(train_loader)):
                 if iteration >= num_train_batch:
                     break
                 # Process in chunks of slice_size timesteps
+                (state, actions, image) = inputs
+                state = state.to(device)
+                actions = actions.to(device)
+                image = image.permute(0, 1, 4, 2, 3).to(device)
+                image = image
                 for t in range(0, 100, slice_size):
                     self.zero_grad()
 
-                    # Slicing the state positions and observations
-                    state_positions = inputs[0][:, t:min(t + slice_size, 100), :]
-                    observations = inputs[2][:, t:min(t + slice_size, 100), ...]
-                    actions = inputs[1][:, t:min(t + slice_size, 99), :]
+                    if t == 0:
+                        start_state = state[:, t:t + 1, :]
+                        state_positions = state[:, t + 1:min(t + slice_size, 100), :]
+                        observations = image[:, t + 1:min(t + slice_size, 100), ...]
+                        actions = actions[:, t:min(t + slice_size-1, 100), ...]
+                        input = [start_state.clone(), state_positions.clone(), actions.clone(), observations.clone()]
+                    else:
+                        state_positions = state[:, t:min(t + slice_size, 100), :]
+                        observations = image[:, t:min(t + slice_size, 100), ...]
+                        actions = actions[:, t:min(t + slice_size, 100), ...]
+                        input = [state_positions.clone(), actions.clone(), observations.clone()]
 
                     # Forward pass for the sliced segment
-                    elbo_value, loss_alltime, loss_all, loss_sup, loss_sup_last, loss_pseud_lik, loss_ae, predictions, particle_list, particle_weight_list, state, start_state, image, likelihood_list, noise_list, obs_likelihood = self.forward(
-                        [state_positions, actions, observations], train=True, params=params,
+                    slice_data_current, elbo_value, loss_alltime, loss_all, loss_sup, loss_sup_last, loss_pseud_lik, loss_ae, predictions, particle_list, particle_weight_list, state_, start_state, image_, likelihood_list, noise_list, obs_likelihood = self.forward(
+                        t, slice_data_next, input, train=True, params=params,
                         environment_data=environment_data)
-
+                    detached_list = [tensor.detach() for tensor in slice_data_current]
+                    slice_data_next = detached_list
                     # Backpropagate and update model parameters
                     if loss_all != 0:
                         loss_all.backward()
@@ -607,52 +598,17 @@ class DPF_base(nn.Module):
                     total_sup_loss.append(loss_sup.detach().cpu().numpy())
                     total_sup_last_loss.append(loss_sup_last.detach().cpu().numpy())
                     total_elbo.append(elbo_value)
+                    loss_alltime_list.append(loss_alltime[0])
                     # total_ae_loss.append(loss_ae.detach().cpu().numpy())
 
                 self.optim_scheduler.step()
 
+            numpy_loss_alltime_list = [tensor.detach().cpu().numpy() for tensor in loss_alltime_list]
+            np.savez(os.path.join('logs', run_id, "data", 'loss_alltime_list.npz'),
+                     loss_alltime=numpy_loss_alltime_list, )
             np.save(os.path.join('logs', run_id, "data", 'online_rmse.npy'), total_sup_loss)
             np.save(os.path.join('logs', run_id, "data", 'online_elbo.npy'), total_elbo)
 
-            # train_loss_sup_mean = np.mean(total_sup_loss)
-            # logger.add_scalar('Sup_loss/loss', train_loss_sup_mean, epoch)
-            # evaluate tqdm(
-            self.eval()
-            total_sup_eval_loss = []
-            total_sup_last_eval_loss = []
-            total_elbo_val = []
-            with torch.no_grad():
-                for iteration, inputs in enumerate(tqdm(valid_loader)):
-                    if iteration >= num_val_batch:
-                        break
-                    self.zero_grad()
-
-                    for t in range(0, 100, slice_size):
-                        self.zero_grad()
-
-                        # Slicing the state positions and observations
-                        state_positions = inputs[0][:, t:min(t + slice_size, 100), :]
-                        observations = inputs[2][:, t:min(t + slice_size, 100), ...]
-                        actions = inputs[1][:, t:min(t + slice_size, 99), :]
-
-                        # Forward pass for the sliced segment
-                        elbo_value, loss_alltime, loss_all, loss_sup, loss_sup_last, loss_pseud_lik, loss_ae, predictions, particle_list, particle_weight_list, state, start_state, image, likelihood_list, noise_list, obs_likelihood = self.forward(
-                            [state_positions, actions, observations], train=True, params=params,
-                            environment_data=environment_data)
-                        total_sup_eval_loss.append(loss_sup.detach().cpu().numpy())
-                        total_sup_last_eval_loss.append(loss_sup_last.detach().cpu().numpy())
-                        total_elbo_val.append(elbo_value)
-
-                eval_loss_sup_mean = np.mean(total_sup_eval_loss)
-                eval_loss_sup_std = np.std(total_sup_eval_loss)
-                eval_loss_last_sup_mean = np.mean(total_sup_last_eval_loss)
-                mean_rmse = np.mean(np.sqrt(total_sup_last_eval_loss))
-                total_rmse = np.sqrt(np.mean(total_sup_last_eval_loss))
-                # logger.add_scalar('Sup_loss_eval/loss', eval_loss_sup_mean, epoch)
-                print(f"online loss evaluation: loss: {eval_loss_sup_mean}, loss_last: {eval_loss_last_sup_mean}, Mean RMSE: {mean_rmse}, Overall RMSE: {total_rmse}, obs_likelihood: {obs_likelihood}", self.NF)
-
-            np.save(os.path.join('logs', run_id, "data", 'online_eval_loss.npy'), total_sup_eval_loss)
-            np.save(os.path.join('logs', run_id, "data", 'online_eval_elbo.npy'), total_elbo_val)
 
     def load_model(self, file_name):
         ckpt_e2e = torch.load(file_name)

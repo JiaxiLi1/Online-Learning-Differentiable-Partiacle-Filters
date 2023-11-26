@@ -139,13 +139,7 @@ class DPF_base(nn.Module):
         return slice_data_current, elbo_value, loss_alltime, total_loss, loss_sup, loss_sup_last, loss_pseud_lik, loss_ae, predictions, particle_list, particle_weight_list, state, start_state, image, likelihood_list, noise_list, obs_likelihood
 
     def filtering_pos(self, t, slice_data_next, obs, start_state_vs, actions, train = True, environment_data = None):
-        if self.param.dataset=='disk':
-            start_state = start_state_vs[:, :2]
-            start_action = start_state_vs[:, 2:]
-            batch_size = start_state.shape[0]
-            environment_measurement = None
-            environment_state = self.pos_noise
-        elif self.param.dataset=='maze':
+        if self.param.dataset=='maze':
             if self.param.learnType == 'offline':
                 action = actions[:, 0]
                 actions = actions[:, 1:]
@@ -590,7 +584,7 @@ class DPF_base(nn.Module):
                 state = torch.stack(state, dim=1)
                 state = state.to(device)
                 image = (torch.stack(image, dim=1)).to(device)
-                image = image.clone()
+                image = image
                 # Process in chunks of slice_size timesteps
                 for t in range(0, 100, slice_size):
                     self.zero_grad()
