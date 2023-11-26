@@ -169,7 +169,7 @@ if __name__ == "__main__":
         train_dataset, valid_dataset, statistics = get_data(args)
         train_loader = DataLoader(train_dataset, batch_size=args.batchsize, shuffle=True, drop_last=True)
         valid_loader = DataLoader(valid_dataset, batch_size=args.batchsize, shuffle=False, drop_last=True)
-        num_train_batch, num_val_batch = 1e10, 1e10
+        num_train_batch, num_val_batch = 100, 100
     # dpf = get_model(args)
 
     if args.dataset == 'maze':

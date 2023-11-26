@@ -100,13 +100,13 @@ class DPF_base(nn.Module):
 
             # total_loss = loss_sup + loss_ae - obs_likelihood / (self.seq_len * 10)  #
             # total_loss = loss_sup - (elbo.mean() * self.param.elbo_ratio)
-            elbo_value = elbo.mean().detach().cpu().numpy()
+            elbo_value = elbo.detach().cpu().numpy()
             if self.param.learnType == 'offline':
                 total_loss = loss_sup + loss_ae
             elif self.param.learnType == 'online':
                 if self.param.onlineType == 'elbo':
                     print(loss_sup.detach().cpu().numpy(), elbo_value)
-                    total_loss = - (elbo.mean() * self.param.elbo_ratio)
+                    total_loss = - (elbo * self.param.elbo_ratio)
                 elif self.param.onlineType == 'fix':
                     total_loss = 0
                 elif self.param.onlineType == 'rmse':
@@ -575,13 +575,13 @@ class DPF_base(nn.Module):
                         start_state = state[:, t:t + 1, :]
                         state_positions = state[:, t + 1:min(t + slice_size, 100), :]
                         observations = image[:, t + 1:min(t + slice_size, 100), ...]
-                        actions = actions[:, t:min(t + slice_size-1, 100), ...]
-                        input = [start_state.clone(), state_positions.clone(), actions.clone(), observations.clone()]
+                        actions_input = actions[:, t:min(t + slice_size-1, 100), ...]
+                        input = [start_state.clone(), state_positions.clone(), actions_input.clone(), observations.clone()]
                     else:
                         state_positions = state[:, t:min(t + slice_size, 100), :]
                         observations = image[:, t:min(t + slice_size, 100), ...]
-                        actions = actions[:, t:min(t + slice_size, 100), ...]
-                        input = [state_positions.clone(), actions.clone(), observations.clone()]
+                        actions_input = actions[:, t-1:min(t + slice_size-1, 100), ...]
+                        input = [state_positions.clone(), actions_input.clone(), observations.clone()]
 
                     # Forward pass for the sliced segment
                     slice_data_current, elbo_value, loss_alltime, loss_all, loss_sup, loss_sup_last, loss_pseud_lik, loss_ae, predictions, particle_list, particle_weight_list, state_, start_state, image_, likelihood_list, noise_list, obs_likelihood = self.forward(
