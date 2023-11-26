@@ -56,7 +56,7 @@ def obs_feature_maze(encodings, num_particles):
     return encodings_obs
 
 def state_feature_maze(particle_encoder, update_particles, environment_data):
-    means, stds, encodings_maps = environment_data
+    # means, stds, encodings_maps = environment_data
     # particle_input = transform_particles_as_input(update_particles, means, stds)
     particle_input = update_particles
     particle_encoder = particle_encoder.float()

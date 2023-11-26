@@ -85,7 +85,7 @@ def setup_seed(seed):
 
 def get_run_id(args):
     if args.dataset == 'maze':
-        cnt = 'linear_{}_NF^{}_{}_{}_{}_resample^{}_{}_{}_{}_{}_{}_elbo_{}_split_{}_mode_{}_slice_size_{}_onlinetype_{}'.format(args.seed, args.NF_dyn, args.trainType, args.NF_lr,
+        cnt = 'linear_dim{}_{}_NF^{}_{}_{}_{}_resample^{}_{}_{}_{}_{}_{}_elbo_{}_split_{}_mode_{}_slice_size_{}_onlinetype_{}'.format(args.dim, args.seed, args.NF_dyn, args.trainType, args.NF_lr,
                                                                     args.lr, args.resampler_type, args.measurement,
                                                                     args.dataset, args.mazeID, args.labeledRatio,
                                                                     args.lamda, args.elbo_ratio, args.split_ratio, args.learnType, args.slice_size, args.onlineType)
@@ -120,6 +120,8 @@ if __name__ == "__main__":
 
     seed=args.seed
     setup_seed(seed)
+    dim = 2
+    args.dim = dim
     # print(args)
     run_id=get_run_id(args)
     print(run_id)
@@ -134,8 +136,6 @@ if __name__ == "__main__":
         if not flag:
             os.mkdir(dirs[i])
 
-    dim = 2
-    args.dim = dim
 
     initial_loc = torch.zeros([dim]).to(device).squeeze()
     initial_scale = torch.eye(dim).to(device).squeeze()
@@ -164,7 +164,7 @@ if __name__ == "__main__":
     emission_scale = ((0.1 ** 0.5) * torch.eye(dim)).to(device).squeeze()
 
     num_timesteps = 51
-    num_timesteps_online = 10
+    num_timesteps_online = 100
     batch_size = 10
     batch_size_online = 1
     total_timestep_online = 5000
@@ -181,17 +181,17 @@ if __name__ == "__main__":
         lgssm.Emission(true_emission_mult, emission_scale).to(device),
         num_timesteps, batch_size)
 
-    dataloader_online = train.get_synthetic_dataloader_online(
+    dataloader_online = train.get_synthetic_dataloader(
         lgssm.Initial(initial_loc, initial_scale).to(device),
         lgssm.Transition(true_transition_mult_online, transition_scale).to(device),
         lgssm.Emission(true_emission_mult_online, emission_scale).to(device),
-        num_timesteps_online, batch_size_online, total_timesteps=total_timestep_online)
+        num_timesteps_online, batch_size_online)
 
-    dataloader_online_val = train.get_synthetic_dataloader_online(
+    dataloader_online_val = train.get_synthetic_dataloader(
         lgssm.Initial(initial_loc, initial_scale).to(device),
-        lgssm.Transition(true_transition_mult_online, transition_scale).to(device),
-        lgssm.Emission(true_emission_mult_online, emission_scale).to(device),
-        num_timesteps_online, batch_size_online, total_timesteps=total_timestep_online)
+        lgssm.Transition(true_transition_mult, transition_scale).to(device),
+        lgssm.Emission(true_emission_mult, emission_scale).to(device),
+        num_timesteps_online, batch_size_online)
 
     # offline task dataset
     if args.dataset == 'house3d':
@@ -201,7 +201,7 @@ if __name__ == "__main__":
         train_dataset, valid_dataset, statistics = get_data(args)
         train_loader = DataLoader(train_dataset, batch_size=args.batchsize, shuffle=True, drop_last=True)
         valid_loader = DataLoader(valid_dataset, batch_size=args.batchsize, shuffle=False, drop_last=True)
-        num_train_batch, num_val_batch = 1e10, 1e10
+        num_train_batch, num_val_batch = 50, 5
     dpf = get_model(args)
 
     if args.dataset == 'maze':
@@ -230,7 +230,7 @@ if __name__ == "__main__":
         train_dataset, valid_dataset, statistics = get_data(args)
         train_loader = DataLoader(train_dataset, batch_size=args.batchsize, shuffle=True, drop_last=True)
         valid_loader = DataLoader(valid_dataset, batch_size=args.batchsize, shuffle=False, drop_last=True)
-        num_train_batch, num_val_batch = 1e10, 1e10
+        num_train_batch, num_val_batch = 50, 50
     # dpf = get_model(args)
 
     if args.dataset == 'maze':
@@ -244,7 +244,7 @@ if __name__ == "__main__":
         environment_data = None
 
     if not args.testing:
-        dpf.train_val(train_loader, valid_loader, run_id, environment_data=environment_data,
+        dpf.train_val(dataloader_online, dataloader_online_val, run_id, environment_data=environment_data,
                       num_train_batch=num_train_batch, num_val_batch=num_val_batch)
         torch.save(dpf, './model/dpf.pkl')
 

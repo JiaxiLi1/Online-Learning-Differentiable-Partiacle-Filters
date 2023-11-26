@@ -100,7 +100,7 @@ def supervised_loss_house(particle_list, particle_weight_list, true_state, mask,
         loss_alltime = torch.abs(torch.sum((prediction - true_state[:, :, :state_dim]), dim=-1))
         return loss_alltime, loss_total, loss_report, prediction
 
-def supervised_loss(particle_list, particle_weight_list, true_state, mask, train, labeledRatio=1.0):
+def supervised_loss(learnType, particle_list, particle_weight_list, true_state, mask, train, labeledRatio=1.0):
 
     # prediction[..., -1] = wrap_angle(prediction[..., -1].clone())
     # loss = torch.sqrt(torch.mean((prediction - true_state) ** 2))  # Rooted mean square error
@@ -120,21 +120,19 @@ def supervised_loss(particle_list, particle_weight_list, true_state, mask, train
     prediction = torch.sum(particle_list * particle_weight_list[:, :, :, None],
                           dim=2)  # the dataset has extra initial state
 
-    if train:
-        if labeledRatio > 0:
-            loss = torch.sqrt( torch.mean(  torch.sum(mask[:,:,None]*(prediction - true_state) ** 2, dim=-1)  )/ (mask.sum()/(mask.shape[0]*mask.shape[1])) ) # Rooted mean square error
-            if mask[:, -1].sum() > 0:
-                loss_last = torch.sqrt( torch.mean(  (torch.sum(mask[:,:,None]*(prediction - true_state) ** 2, dim=-1))[:,-1]  )/ (mask[:,-1].sum()/mask.shape[0])  )
-            else:
-                loss_last = torch.zeros_like(loss)
-            return None, loss, loss_last, prediction
-        elif labeledRatio == 0:
-            return 0
-    else:
-        loss = torch.sqrt( torch.mean(torch.sum((prediction - true_state) ** 2, dim=-1)))
+    loss = torch.sqrt( torch.mean(torch.sum((prediction - true_state) ** 2, dim=-1))) # Rooted mean square error
+    loss_last = torch.sqrt( torch.mean( (torch.sum((prediction - true_state) ** 2, dim=-1)[:,-1])))
+    if learnType == 'offline':
+        return None, loss, loss_last, prediction
+    if learnType == 'online':
         loss_alltime = torch.abs(torch.sum((prediction - true_state), dim=-1))
-        loss_last = torch.sqrt(torch.mean( (torch.sum((prediction - true_state) ** 2, dim=-1)[:,-1] )))
         return loss_alltime, loss, loss_last, prediction
+
+    # else:
+    #     loss = torch.sqrt( torch.mean(torch.sum((prediction - true_state) ** 2, dim=-1)))
+    #     loss_alltime = torch.abs(torch.sum((prediction - true_state), dim=-1))
+    #     loss_last = torch.sqrt(torch.mean( (torch.sum((prediction - true_state) ** 2, dim=-1)[:,-1] )))
+    #     return loss_alltime, loss, loss_last, prediction
 
 # def supervised_loss(particle_list, particle_weight_list, true_state, mask, train, labeledRatio=1.0):
 #
