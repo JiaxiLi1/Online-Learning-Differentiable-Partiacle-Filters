@@ -108,13 +108,13 @@ class DPF_base(nn.Module):
 
             # total_loss = loss_sup + loss_ae - obs_likelihood / (self.seq_len * 10)  #
             # total_loss = loss_sup - (elbo.mean() * self.param.elbo_ratio)
-            elbo_value = elbo.detach().cpu().numpy()
+            elbo_value = elbo.mean().detach().cpu().numpy()
             if self.param.learnType == 'offline':
                 total_loss = loss_sup
             elif self.param.learnType == 'online':
                 if self.param.onlineType == 'elbo':
                     print(loss_sup.detach().cpu().numpy(), elbo_value)
-                    total_loss = - (elbo * self.param.elbo_ratio)
+                    total_loss = - (elbo.mean() * self.param.elbo_ratio)
                 elif self.param.onlineType == 'fix':
                     total_loss = 0
                 elif self.param.onlineType == 'rmse':
