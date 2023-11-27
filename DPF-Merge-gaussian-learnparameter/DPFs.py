@@ -105,7 +105,7 @@ class DPF_base(nn.Module):
             # total_loss = loss_sup - (elbo.mean() * self.param.elbo_ratio)
             elbo_value = elbo.mean().detach().cpu().numpy()
             if self.param.learnType == 'offline':
-                total_loss = - (elbo.mean() )
+                total_loss = -1e-2*torch.mean(elbo)#- (1e-2*elbo.mean() )
             elif self.param.learnType == 'online':
                 if self.param.onlineType == 'elbo':
                     print(loss_sup.detach().cpu().numpy(), elbo_value)
@@ -119,6 +119,43 @@ class DPF_base(nn.Module):
 
         return slice_data_current, elbo_value, loss_alltime, total_loss, loss_sup, loss_sup_last, loss_pseud_lik, loss_ae, predictions, particle_list, particle_weight_list, state, image, likelihood_list, obs_likelihood
 
+    def sample_ancestral_index(self, log_weight):
+        """Sample ancestral index using systematic resampling.
+
+        Args:
+            log_weight: log of unnormalized weights, tensor
+                [batch_size, num_particles]
+        Returns:
+            zero-indexed ancestral index: LongTensor [batch_size, num_particles]
+        """
+
+        if torch.sum(log_weight != log_weight).item() != 0:
+            raise FloatingPointError('log_weight contains nan element(s)')
+
+        batch_size, num_particles = log_weight.size()
+        indices = np.zeros([batch_size, num_particles])
+
+        uniforms = np.random.uniform(size=[batch_size, 1])
+        pos = (uniforms + np.arange(0, num_particles)) / num_particles
+
+        normalized_weights = aesmc.math.exponentiate_and_normalize(
+            log_weight.detach().cpu().numpy(), dim=1)
+
+        # np.ndarray [batch_size, num_particles]
+        cumulative_weights = np.cumsum(normalized_weights, axis=1)
+
+        # hack to prevent numerical issues
+        cumulative_weights = cumulative_weights / np.max(
+            cumulative_weights, axis=1, keepdims=True)
+
+        for batch in range(batch_size):
+            indices[batch] = np.digitize(pos[batch], cumulative_weights[batch])
+
+        if log_weight.is_cuda:
+            return torch.from_numpy(indices).long().cuda()
+        else:
+            return torch.from_numpy(indices).long()
+
     def filtering_pos(self, t, slice_data_next, obs, train = True, environment_data = None):
         if self.param.dataset=='maze':
             batch_size = obs.shape[0]
@@ -127,6 +164,8 @@ class DPF_base(nn.Module):
             raise ValueError('Please select a dataset from {disk, maze, house3d}')
 
         obs_likelihood = 0.0
+        ancestral_indices = []
+        log_weights = []
         # if self.param.learnType == 'online':
         if t == 0 or self.param.learnType == 'offline':
             particles, particle_probs = self.proposal.sample(observations=obs[:, 0, :], time=t, batch_size=batch_size,
@@ -136,6 +175,8 @@ class DPF_base(nn.Module):
                 self.emission(latents=[particles], time=0),
                 aesmc.state.expand_observation(obs[:,0,:], self.num_particle))
 
+            log_weights.append(transition_log_prob + emission_log_prob -
+                               particle_probs)
             particle_probs_resampled = transition_log_prob + emission_log_prob - particle_probs
             unnormalize_weight_next = particle_probs_resampled
             unnormalize_weight_de = torch.logsumexp(unnormalize_weight_next, dim=1)
@@ -161,23 +202,26 @@ class DPF_base(nn.Module):
                 t=1
                 continue
             # index_p shape: (batch, num_p)
-            index_p = (torch.arange(self.num_particle)+self.num_particle* torch.arange(batch_size)[:, None].repeat((1, self.num_particle))).type(torch.int64).to(device)
-            ESS = torch.mean(1/torch.sum(particle_probs**2, dim=-1))
+            ancestral_indices.append(self.sample_ancestral_index(log_weights[-1]))
+            particles_resampled = aesmc.state.resample(particles, ancestral_indices[-1])
 
-            if ESS<0.5*self.num_particle:
-                if train:
-                    particles_resampled, particle_probs_resampled, index_p = self.resampler(particles, particle_probs)
-                else:
-                    particles_resampled, particle_probs_resampled, index_p = self.resampler(particles,
-                                                                                                 particle_probs)
-                particle_probs_resampled = particle_probs_resampled.log()
-                particle_probs_elbo = particle_probs_resampled
-            else:
-                particles_resampled = particles
-                particle_probs_resampled = particle_probs.log()
-                particle_probs_elbo = unnormalize_weight_next
-
-            unnormalize_weight_nu = torch.logsumexp(particle_probs_elbo, dim=1)
+            # index_p = (torch.arange(self.num_particle)+self.num_particle* torch.arange(batch_size)[:, None].repeat((1, self.num_particle))).type(torch.int64).to(device)
+            # ESS = torch.mean(1/torch.sum(particle_probs**2, dim=-1))
+            #
+            # if ESS<0.5*self.num_particle:
+            #     if train:
+            #         particles_resampled, particle_probs_resampled, index_p = self.resampler(particles, particle_probs)
+            #     else:
+            #         particles_resampled, particle_probs_resampled, index_p = self.resampler(particles,
+            #                                                                                      particle_probs)
+            #     particle_probs_resampled = particle_probs_resampled.log()
+            #     particle_probs_elbo = particle_probs_resampled
+            # else:
+            #     particles_resampled = particles
+            #     particle_probs_resampled = particle_probs.log()
+            #     particle_probs_elbo = unnormalize_weight_next
+            #
+            # unnormalize_weight_nu = torch.logsumexp(particle_probs_elbo, dim=1)
 
             propose_particle, proposal_log_prob = self.proposal.sample(previous_latents=particles_resampled,
                                                         observations=obs[:,step,:],
@@ -185,19 +229,22 @@ class DPF_base(nn.Module):
                                                         batch_size=batch_size,
                                                         num_particles=self.num_particle)
             transition_log_prob = aesmc.state.log_prob(
-                self.transition(previous_latents=[propose_particle], time=time),
+                self.transition(previous_latents=[particles_resampled], time=time),
                 propose_particle)
             emission_log_prob = aesmc.state.log_prob(
                 self.emission(latents=[propose_particle], time=time),
                 aesmc.state.expand_observation(obs[:,step,:], self.num_particle))
 
-            particle_probs_resampled = particle_probs_resampled + emission_log_prob + transition_log_prob - proposal_log_prob
+            log_weights.append(transition_log_prob + emission_log_prob -
+                               proposal_log_prob)
 
-            unnormalize_weight_next = particle_probs_resampled
-            unnormalize_weight_de = torch.logsumexp(unnormalize_weight_next, dim=1)
-            elbo += unnormalize_weight_de - unnormalize_weight_nu
+            # particle_probs_resampled = particle_probs_resampled + emission_log_prob + transition_log_prob - proposal_log_prob
+            #
+            # unnormalize_weight_next = particle_probs_resampled
+            # unnormalize_weight_de = torch.logsumexp(unnormalize_weight_next, dim=1)
+            # elbo += unnormalize_weight_de - unnormalize_weight_nu
             particles = propose_particle
-            particle_probs = particle_probs_resampled
+            particle_probs = log_weights[-1]
             obs_likelihood += particle_probs.mean()
             particle_probs = normalize_log_probs(particle_probs)+1e-12
 
@@ -215,7 +262,10 @@ class DPF_base(nn.Module):
                 if self.NF:
                     prior_list = torch.cat([prior_list, transition_log_prob[:, None]], dim=1)
 
-        return [obs_likelihood, particles, particle_probs, unnormalize_weight_next], elbo, particle_list, particle_probs_list, likelihood_list, prior_list, obs_likelihood
+        temp = torch.logsumexp(torch.stack(log_weights, dim=0), dim=2) - \
+                np.log(self.num_particle)
+        log_marginal_likelihood = torch.sum(temp, dim=0)
+        return [obs_likelihood, particles, particle_probs, unnormalize_weight_next], log_marginal_likelihood, particle_list, particle_probs_list, likelihood_list, prior_list, obs_likelihood
 
     def get_mask(self):
 

@@ -142,7 +142,7 @@ if __name__ == "__main__":
     if dim > 1:
         true_transition_mult = torch.ones([dim, dim]).to(device).squeeze()
         true_transition_mult_online = torch.ones([dim, dim]).to(device).squeeze()
-        init_transition_mult = torch.diag(1.0 * torch.ones([dim])).to(device).squeeze()
+        init_transition_mult = torch.diag(0.5 * torch.ones([dim])).to(device).squeeze()
         for i in range(dim):
             for j in range(dim):
                 true_transition_mult[i, j] = 0.42 ** (abs(i - j) + 1)
@@ -156,7 +156,7 @@ if __name__ == "__main__":
     transition_scale = torch.eye(dim).to(device).squeeze()
     true_emission_mult = (0.5 * torch.ones(dim)).to(device).squeeze()
     true_emission_mult_online = (0.8 * torch.ones(dim)).to(device).squeeze()
-    init_emission_mult = (1.0 * torch.ones(dim)).to(device).squeeze()
+    init_emission_mult = (0.5 * torch.ones(dim)).to(device).squeeze()
 
     init_proposal_scale_0 = 1.0 * torch.ones(dim).to(device)  # (0.1*torch.eye(dim)).to(device).squeeze()
     init_proposal_scale_t = 1.0 * torch.ones(dim).to(device)  # (0.1*torch.eye(dim)).to(device).squeeze()
