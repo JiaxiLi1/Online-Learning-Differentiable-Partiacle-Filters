@@ -571,8 +571,8 @@ class TrainingStats(object):
             latents_test=self.test_obs[0]
             latents_test = [latent_test.to(self.device).unsqueeze(-1) if len(latent_test.shape) == 1 else latent_test.to(self.device)
                        for latent_test in latents_test]
-            inference_result = aesmc.inference.infer(
-                self.algorithm, self.test_obs[1], self.initial,
+            inference_result, _ = aesmc.inference.infer(
+                [None,None],self.algorithm, self.test_obs[1], self.initial,
                 transition, emission, proposal,
                 self.test_inference_num_particles, args=self.args, true_latents=latents_test,
                 return_log_marginal_likelihood=True)
@@ -593,8 +593,8 @@ class TrainingStats(object):
                 latents = self.test_obs[0]
                 latents = [latent.to(self.device).unsqueeze(-1) if len(latent.shape) == 1 else latent.to(self.device)
                            for latent in latents]
-                inference_result = aesmc.inference.infer(
-                    self.algorithm, self.test_obs[1], self.initial,
+                inference_result, _ = aesmc.inference.infer(
+                    [None,None], self.algorithm, self.test_obs[1], self.initial,
                     transition, emission, proposal,
                     self.test_inference_num_particles, args=self.args, true_latents=latents,
                     return_log_marginal_likelihood=True)
@@ -620,8 +620,8 @@ class TrainingStats(object):
                 latents = self.test_obs_online1[0]
                 latents = [latent.to(self.device).unsqueeze(-1) if len(latent.shape) == 1 else latent.to(self.device)
                            for latent in latents]
-                inference_result = aesmc.inference.infer(
-                    self.algorithm, self.test_obs_online1[1], self.initial,
+                inference_result, _ = aesmc.inference.infer(
+                    [None,None],self.algorithm, self.test_obs_online1[1], self.initial,
                     transition, emission, proposal,
                     self.test_inference_num_particles, args=self.args, true_latents=latents,
                     return_log_marginal_likelihood=True)
@@ -631,33 +631,33 @@ class TrainingStats(object):
                 # self.loss_history.append(inference_result['log_marginal_likelihood'].cpu().detach().numpy())
                 self.loss_history.append(inference_result['loss_report'].cpu().detach().numpy())
                 self.iteration_idx_history.append(epoch_iteration_idx)
-            if stage ==2:
-                self.p_l2_history.append(np.linalg.norm(
-                    np.concatenate(
-                        [transition.mult.flatten().cpu().detach().numpy(), emission.mult.cpu().detach().numpy()]) -
-                    np.concatenate([self.true_transition_mult_online2.flatten().cpu().detach().numpy(),
-                                    self.true_emission_mult_online2.diag().cpu().detach().numpy()])
-                    if self.dim != 1 else np.array(
-                        [transition.mult.flatten().cpu().detach().numpy(), emission.mult.cpu().detach().numpy()],
-                        dtype=object) -
-                                          np.array([self.true_transition_mult_online2.cpu().detach().numpy(),
-                                                    self.true_emission_mult_online2.cpu().detach().numpy()],
-                                                   dtype=object)
-                ).squeeze())
-                latents = self.test_obs_online2[0]
-                latents = [latent.to(self.device).unsqueeze(-1) if len(latent.shape) == 1 else latent.to(self.device)
-                           for latent in latents]
-                inference_result = aesmc.inference.infer(
-                    self.algorithm, self.test_obs_online2[1], self.initial,
-                    transition, emission, proposal,
-                    self.test_inference_num_particles, args=self.args, true_latents=latents,
-                    return_log_marginal_likelihood=True)
-                normalized_weights = aesmc.math.normalize_log_probs(
-                    torch.stack(inference_result['log_weights'], dim=0)) + 1e-8
-                self.normalized_log_weights_history.append(normalized_weights.cpu().detach().numpy())
-                # self.loss_history.append(inference_result['log_marginal_likelihood'].cpu().detach().numpy())
-                self.loss_history.append(inference_result['loss_report'].cpu().detach().numpy())
-                self.iteration_idx_history.append(epoch_iteration_idx)
+            # if stage ==2:
+            #     self.p_l2_history.append(np.linalg.norm(
+            #         np.concatenate(
+            #             [transition.mult.flatten().cpu().detach().numpy(), emission.mult.cpu().detach().numpy()]) -
+            #         np.concatenate([self.true_transition_mult_online2.flatten().cpu().detach().numpy(),
+            #                         self.true_emission_mult_online2.diag().cpu().detach().numpy()])
+            #         if self.dim != 1 else np.array(
+            #             [transition.mult.flatten().cpu().detach().numpy(), emission.mult.cpu().detach().numpy()],
+            #             dtype=object) -
+            #                               np.array([self.true_transition_mult_online2.cpu().detach().numpy(),
+            #                                         self.true_emission_mult_online2.cpu().detach().numpy()],
+            #                                        dtype=object)
+            #     ).squeeze())
+            #     latents = self.test_obs_online2[0]
+            #     latents = [latent.to(self.device).unsqueeze(-1) if len(latent.shape) == 1 else latent.to(self.device)
+            #                for latent in latents]
+            #     inference_result = aesmc.inference.infer(
+            #         self.algorithm, self.test_obs_online2[1], self.initial,
+            #         transition, emission, proposal,
+            #         self.test_inference_num_particles, args=self.args, true_latents=latents,
+            #         return_log_marginal_likelihood=True)
+            #     normalized_weights = aesmc.math.normalize_log_probs(
+            #         torch.stack(inference_result['log_weights'], dim=0)) + 1e-8
+            #     self.normalized_log_weights_history.append(normalized_weights.cpu().detach().numpy())
+            #     # self.loss_history.append(inference_result['log_marginal_likelihood'].cpu().detach().numpy())
+            #     self.loss_history.append(inference_result['loss_report'].cpu().detach().numpy())
+            #     self.iteration_idx_history.append(epoch_iteration_idx)
 
         if epoch_iteration_idx % self.logging_interval == 0 or epoch_iteration_idx + 1 == self.num_iterations:
             print('Iteration {}:'

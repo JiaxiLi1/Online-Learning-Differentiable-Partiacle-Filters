@@ -93,7 +93,7 @@ def infer(online_data, inference_algorithm, observations, initial, transition, e
     log_weights = []
     log_weights_true = []
     (data_current, online_state) = online_data
-    if online_state == 'start':
+    if online_state == 'start' or online_state == None:
         if type(proposal).__name__ == 'Proposal_cnf':
             latent, proposal_log_prob = proposal.sample(observations=observations, time=0, batch_size=batch_size, num_particles=num_particles)
         else:

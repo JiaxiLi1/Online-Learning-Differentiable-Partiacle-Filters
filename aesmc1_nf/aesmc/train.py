@@ -42,7 +42,7 @@ def train(dataloader_online1, dataloader_online2, dataloader, num_particles, alg
                     break
             optimizer_model.zero_grad()
             optimizer_proposal.zero_grad()
-            loss, data_pre_step = losses.get_loss(training_stage, observations, num_particles, algorithm,
+            loss, data_pre_step = losses.get_loss([None,None], training_stage, observations, num_particles, algorithm,
                                    initial, transition, emission, proposal, args = args, true_latents=true_latents)
             loss.backward()
             optimizer_model.step()

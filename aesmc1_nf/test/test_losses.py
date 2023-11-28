@@ -155,8 +155,8 @@ class TestModels(unittest.TestCase):
         logging_interval = 10
         batch_size = 10
         batch_size_online = 1
-        num_iterations = 500
-        num_iterations_online = 500
+        num_iterations = 50
+        num_iterations_online = 50
         num_particles = 100
         num_experiments = 1
         num_of_flows = [1]
@@ -217,7 +217,7 @@ class TestModels(unittest.TestCase):
                 markers = {'aesmc': 'X',
                            'bootstrap': 'p',
                            'cnf-dpf-1': '*',
-                           'cnf-dpf-nvp-2': '^',
+                           'cnf-dpf-nvp-1': '^',
                            'cnf-dpf-nvp-4': '+',
                            'cnf-dpf-nvp-8': '2',
                            'cnf-dpf-nvp-25': '>',
