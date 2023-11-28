@@ -100,6 +100,8 @@ class Proposal(nn.Module):
                 self.dist(self.lin_0(observations[0].unsqueeze(-1) if self.dim ==1 else observations[0]).squeeze(-1), self.scale_0),
                 aesmc.state.BatchShapeMode.BATCH_EXPANDED)
         else:
+            if time == 0.1:
+                time = 0
             num_particles = previous_latents[-1].shape[1]
             a=self.lin_t(torch.cat(
                             [previous_latents[-1].unsqueeze(-1) if self.dim ==1 else previous_latents[-1],
@@ -197,6 +199,8 @@ class Proposal_cnf(nn.Module):
                 proposal_log_prob = aesmc.state.log_prob(dist_0, samples)
                 return samples, proposal_log_prob
             else:
+                if time == 0.1:
+                    time = 0
                 loc = self.lin_t(torch.cat(
                         [previous_latents[-1].unsqueeze(-1) if self.dim ==1 else previous_latents[-1],
                          (observations[time].view(-1, 1, 1) if self.dim ==1 else observations[time].unsqueeze(1)).repeat(1, num_particles, 1)],

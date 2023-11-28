@@ -42,7 +42,7 @@ def train(dataloader_online1, dataloader_online2, dataloader, num_particles, alg
                     break
             optimizer_model.zero_grad()
             optimizer_proposal.zero_grad()
-            loss = losses.get_loss(training_stage, observations, num_particles, algorithm,
+            loss, data_pre_step = losses.get_loss(training_stage, observations, num_particles, algorithm,
                                    initial, transition, emission, proposal, args = args, true_latents=true_latents)
             loss.backward()
             optimizer_model.step()
@@ -53,6 +53,8 @@ def train(dataloader_online1, dataloader_online2, dataloader, num_particles, alg
                          transition, emission, proposal, stage=0)
 
         training_stage = 'online1'
+        online_state = 'start'
+        data_current = 0.0
         print(training_stage)
         for epoch_iteration_idx, latents_and_observations in enumerate(dataloader_online1):
             true_latents = latents_and_observations[0]
@@ -67,8 +69,9 @@ def train(dataloader_online1, dataloader_online2, dataloader, num_particles, alg
                     break
             optimizer_model.zero_grad()
             optimizer_proposal.zero_grad()
-            loss = losses.get_loss(training_stage, observations, num_particles, algorithm,
+            loss, data_pre_step = losses.get_loss([data_current,online_state], training_stage, observations, num_particles, algorithm,
                                    initial, transition, emission, proposal, args = args, true_latents=true_latents)
+            data_current = data_pre_step
             if args.trainType != 'DPF':
                 loss.backward()
                 optimizer_model.step()
@@ -78,32 +81,32 @@ def train(dataloader_online1, dataloader_online2, dataloader, num_particles, alg
                 callback(epoch_idx, epoch_iteration_idx, loss, initial,
                          transition, emission, proposal, stage=1)
 
-        training_stage = 'online2'
-        print(training_stage)
-        for epoch_iteration_idx, latents_and_observations in enumerate(dataloader_online2):
-            true_latents = latents_and_observations[0]
-            true_latents = [x.unsqueeze(0) for x in true_latents]
-            true_latents = [
-                true_latent.to(device).unsqueeze(-1) if len(true_latent.shape) == 1 else true_latent.to(device)
-                for true_latent in true_latents]
-            observations = latents_and_observations[1]
-            observations = [x.unsqueeze(0) for x in observations]
-            observations = [observation.to(device) for observation in observations]
-            if num_iterations_per_epoch_online is not None:
-                if epoch_iteration_idx == num_iterations_per_epoch_online:
-                    break
-            optimizer_model.zero_grad()
-            optimizer_proposal.zero_grad()
-            loss = losses.get_loss(training_stage, observations, num_particles, algorithm,
-                                   initial, transition, emission, proposal, args=args, true_latents=true_latents)
-            if args.trainType != 'DPF':
-                loss.backward()
-                optimizer_model.step()
-                optimizer_proposal.step()
-
-            if callback is not None:
-                callback(epoch_idx, epoch_iteration_idx, loss, initial,
-                         transition, emission, proposal, stage=2)
+        # training_stage = 'online2'
+        # print(training_stage)
+        # for epoch_iteration_idx, latents_and_observations in enumerate(dataloader_online2):
+        #     true_latents = latents_and_observations[0]
+        #     true_latents = [x.unsqueeze(0) for x in true_latents]
+        #     true_latents = [
+        #         true_latent.to(device).unsqueeze(-1) if len(true_latent.shape) == 1 else true_latent.to(device)
+        #         for true_latent in true_latents]
+        #     observations = latents_and_observations[1]
+        #     observations = [x.unsqueeze(0) for x in observations]
+        #     observations = [observation.to(device) for observation in observations]
+        #     if num_iterations_per_epoch_online is not None:
+        #         if epoch_iteration_idx == num_iterations_per_epoch_online:
+        #             break
+        #     optimizer_model.zero_grad()
+        #     optimizer_proposal.zero_grad()
+        #     loss = losses.get_loss(training_stage, observations, num_particles, algorithm,
+        #                            initial, transition, emission, proposal, args=args, true_latents=true_latents)
+        #     if args.trainType != 'DPF':
+        #         loss.backward()
+        #         optimizer_model.step()
+        #         optimizer_proposal.step()
+        #
+        #     if callback is not None:
+        #         callback(epoch_idx, epoch_iteration_idx, loss, initial,
+        #                  transition, emission, proposal, stage=2)
 
 
 class SyntheticDataset(torch.utils.data.Dataset):

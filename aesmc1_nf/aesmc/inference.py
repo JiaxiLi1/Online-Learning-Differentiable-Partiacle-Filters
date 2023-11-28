@@ -9,7 +9,7 @@ sys.path.append('../test/')
 
 from test.models import lgssm
 
-def infer(inference_algorithm, observations, initial, transition, emission,
+def infer(online_data, inference_algorithm, observations, initial, transition, emission,
           proposal, num_particles, return_log_marginal_likelihood=False,
           return_latents=False, return_original_latents=True,
           return_log_weight=True, return_log_weights=True,
@@ -92,30 +92,60 @@ def infer(inference_algorithm, observations, initial, transition, emission,
         ancestral_indices = []
     log_weights = []
     log_weights_true = []
-    if type(proposal).__name__ == 'Proposal_cnf':
-        latent, proposal_log_prob = proposal.sample(observations=observations, time=0, batch_size=batch_size, num_particles=num_particles)
+    (data_current, online_state) = online_data
+    if online_state == 'start':
+        if type(proposal).__name__ == 'Proposal_cnf':
+            latent, proposal_log_prob = proposal.sample(observations=observations, time=0, batch_size=batch_size, num_particles=num_particles)
+        else:
+            proposal_dist = proposal(time=0, observations=observations)
+            latent = state.sample(proposal_dist, batch_size, num_particles)
+            proposal_log_prob = state.log_prob(proposal_dist, latent)
+        latents_bar = [latent]
+        initial_log_prob = state.log_prob(initial(), latent)
+        emission_log_prob = state.log_prob(
+            emission(latents=latents_bar, time=0),
+            state.expand_observation(observations[0], num_particles))
+
+        if return_original_latents or return_latents:
+            original_latents.append(latent)
+
+        log_weights.append(initial_log_prob + emission_log_prob -
+                           proposal_log_prob)
     else:
-        proposal_dist = proposal(time=0, observations=observations)
-        latent = state.sample(proposal_dist, batch_size, num_particles)
-        proposal_log_prob = state.log_prob(proposal_dist, latent)
-    latents_bar = [latent]
-    initial_log_prob = state.log_prob(initial(), latent)
-    emission_log_prob = state.log_prob(
-        emission(latents=latents_bar, time=0),
-        state.expand_observation(observations[0], num_particles))
+        state_pre, weights_pre = data_current
+        if inference_algorithm == 'smc':
+            if args.resampler_type == 'ot' or args.resampler_type == 'soft':
+                applied_resampler = resampler(args)
+                particle_weights = math.normalize_log_probs(weights_pre)+1e-8
+                previous_latents_bar = [
+                    applied_resampler(torch.unsqueeze(state_pre, -1), particle_weights)[0].squeeze()]
+            else:
+                ancestral_indices.append(sample_ancestral_index(weights_pre))
+                previous_latents_bar = [
+                    state.resample(state_pre, ancestral_indices[-1])]
+        if type(proposal).__name__ == 'Proposal_cnf':
+            latent, proposal_log_prob = proposal.sample(previous_latents=previous_latents_bar,
+                                                        observations=observations,
+                                                        time=0.1,
+                                                        batch_size=batch_size,
+                                                        num_particles=num_particles)
+        else:
+            proposal_dist = proposal(previous_latents=previous_latents_bar,
+                                     time=0.1, observations=observations)
+            latent = state.sample(proposal_dist, batch_size, num_particles)
+            proposal_log_prob = state.log_prob(proposal_dist, latent)
+        latents_bar = [latent]
+        transition_log_prob = state.log_prob(
+            transition(previous_latents=previous_latents_bar),latent)
+        emission_log_prob = state.log_prob(
+            emission(latents=latents_bar),state.expand_observation(observations[0], num_particles))
 
-    emission_true = copy.deepcopy(emission)
-    emission_log_prob_true = state.log_prob(
-        emission_true(latents=latents_bar, time=0),
-        state.expand_observation(observations[0], num_particles))
+        if return_original_latents or return_latents:
+            original_latents.append(latent)
 
-    if return_original_latents or return_latents:
-        original_latents.append(latent)
+        log_weights.append(transition_log_prob + emission_log_prob -
+                           proposal_log_prob)
 
-    log_weights_true.append(initial_log_prob + emission_log_prob_true -
-                       proposal_log_prob)
-    log_weights.append(initial_log_prob + emission_log_prob -
-                       proposal_log_prob)
     for time in range(1, len(observations)):
         if inference_algorithm == 'smc':
             if args.resampler_type == 'ot' or args.resampler_type == 'soft':
@@ -152,17 +182,10 @@ def infer(inference_algorithm, observations, initial, transition, emission,
                      previous_observations=observations[:time]),
             state.expand_observation(observations[time], num_particles))
 
-        emission_log_prob_true = state.log_prob(
-            emission_true(latents=latents_bar, time=time,
-                     previous_observations=observations[:time]),
-            state.expand_observation(observations[time], num_particles))
-
         if return_original_latents or return_latents:
             original_latents.append(latent)
 
         log_weights.append(transition_log_prob + emission_log_prob -
-                           proposal_log_prob)
-        log_weights_true.append(transition_log_prob + emission_log_prob_true -
                            proposal_log_prob)
         index_p = (torch.arange(num_particles) + num_particles * torch.arange(batch_size)[:, None].repeat(
             (1, num_particles))).type(torch.int64).to(device)
@@ -182,10 +205,6 @@ def infer(inference_algorithm, observations, initial, transition, emission,
             temp = torch.logsumexp(torch.stack(log_weights, dim=0), dim=2) - \
                 np.log(num_particles)
             log_marginal_likelihood = torch.sum(temp, dim=0)
-
-            temp_true = torch.logsumexp(torch.stack(log_weights_true, dim=0), dim=2) - \
-                np.log(num_particles)
-            log_marginal_likelihood_true = torch.sum(temp_true, dim=0)
         else:
             log_marginal_likelihood = None
 
@@ -255,7 +274,6 @@ def infer(inference_algorithm, observations, initial, transition, emission,
     loss_rmse = torch.sqrt(torch.mean(diff**2))
     loss_report = torch.sqrt(torch.mean(diff**2))
 
-    pseudo_loss = pseudolikelihood_loss(log_weights_list, emission_log_prob_list, index_list, transition_log_prob_list)
     # loss_rmse = torch.mean(torch.sum(torch.sqrt(torch.sum((diff)**2, dim=-1)),dim=0), dim=0)
     return {'log_marginal_likelihood': log_marginal_likelihood,
             'latents': latents,
@@ -265,8 +283,7 @@ def infer(inference_algorithm, observations, initial, transition, emission,
             'ancestral_indices': ancestral_indices,
             'last_latent': latent,
             'loss_rmse': loss_rmse,
-            'pseudo_loss': pseudo_loss,
-            'loss_report': loss_report}
+            'loss_report': loss_report}, [latents_bar[-1], log_weights[-1]]
 
 def get_mask(diff, ratio):
 

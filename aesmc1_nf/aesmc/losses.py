@@ -2,7 +2,7 @@ from . import inference
 import torch
 
 
-def get_loss(training_stage, observations, num_particles, algorithm, initial, transition,
+def get_loss(online_data, training_stage, observations, num_particles, algorithm, initial, transition,
              emission, proposal, args=None, true_latents=None):
     """Returns a differentiable loss for gradient descent.
 
@@ -51,7 +51,8 @@ def get_loss(training_stage, observations, num_particles, algorithm, initial, tr
         online_learning = True
     else:
         online_learning = False
-    inference_result = inference.infer(inference_algorithm=inference_algorithm,
+    inference_result, data_pre_step = inference.infer(online_data=online_data,
+                                        inference_algorithm=inference_algorithm,
                                        observations=observations,
                                        initial=initial,
                                        transition=transition,
@@ -69,18 +70,14 @@ def get_loss(training_stage, observations, num_particles, algorithm, initial, tr
                                        online_learning=online_learning)
     elbo = inference_result['log_marginal_likelihood']
     loss_rmse = inference_result['loss_rmse']
-    pseudo_loss = inference_result['pseudo_loss']
-    pseudo_loss = 1e-2*pseudo_loss
     loss = -1e-2*torch.mean(elbo)
     # print(loss_rmse)
     if training_stage == 'offline':
-        return loss_rmse
+        return loss_rmse, data_pre_step
 
     if args.trainType == 'DPF':
-        return loss_rmse
+        return loss_rmse, data_pre_step
     elif args.trainType == 'SDPF_elbo':
-        return loss
-    elif args.trainType == 'SDPF_pl':
-        return pseudo_loss
+        return loss, data_pre_step
     else:
         raise ValueError('Please select an algorithm from different DPF.')
