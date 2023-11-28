@@ -105,7 +105,7 @@ class DPF_base(nn.Module):
             # total_loss = loss_sup - (elbo.mean() * self.param.elbo_ratio)
             elbo_value = elbo.mean().detach().cpu().numpy()
             if self.param.learnType == 'offline':
-                total_loss = loss_sup#- (1e-2*elbo.mean() )
+                total_loss = -1e-2*torch.mean(elbo)#- (1e-2*elbo.mean() )
             elif self.param.learnType == 'online':
                 print(loss_sup.detach().cpu().numpy(), elbo_value)
                 if self.param.onlineType == 'elbo':
@@ -630,6 +630,7 @@ class DPF_base(nn.Module):
                     # total_ae_loss.append(loss_ae.detach().cpu().numpy())
 
                 # self.optim_scheduler.step()
+            print('rmse',np.mean(total_sup_loss), 'elbo',np.mean(total_elbo))
             numpy_loss_alltime_list = [tensor.detach().cpu().numpy() for tensor in loss_alltime_list]
             np.savez(os.path.join('logs', run_id, "data", 'loss_alltime_list.npz'),
                      loss_alltime=numpy_loss_alltime_list,)

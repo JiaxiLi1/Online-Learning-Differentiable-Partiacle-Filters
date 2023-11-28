@@ -651,6 +651,7 @@ class DPF_base(nn.Module):
                     # total_ae_loss.append(loss_ae.detach().cpu().numpy())
 
                 self.optim_scheduler.step()
+            print('rmse', np.mean(total_sup_loss), 'elbo', np.mean(total_elbo))
             numpy_loss_alltime_list = [tensor.detach().cpu().numpy() for tensor in loss_alltime_list]
             np.savez(os.path.join('logs', run_id, "data", 'loss_alltime_list.npz'),
                      loss_alltime=numpy_loss_alltime_list,)
