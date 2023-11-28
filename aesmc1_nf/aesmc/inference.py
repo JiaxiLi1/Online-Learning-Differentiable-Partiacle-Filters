@@ -283,7 +283,7 @@ def infer(online_data, inference_algorithm, observations, initial, transition, e
             'ancestral_indices': ancestral_indices,
             'last_latent': latent,
             'loss_rmse': loss_rmse,
-            'loss_report': loss_report}, [latents_bar[-1], log_weights[-1]]
+            'loss_report': loss_report}, [latents_bar[-1].detach(), log_weights[-1].detach()]
 
 def get_mask(diff, ratio):
 

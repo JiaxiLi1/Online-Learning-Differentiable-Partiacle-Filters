@@ -113,7 +113,7 @@ class TestModels(unittest.TestCase):
         from models import lgssm
         print('\nTraining the \"linear Gaussian state space model\"'
               ' autoencoder.')
-        dim = 2
+        dim = 1
 
         initial_loc = torch.zeros([dim]).to(device).squeeze()
         initial_scale = torch.eye(dim).to(device).squeeze()
@@ -121,25 +121,25 @@ class TestModels(unittest.TestCase):
             true_transition_mult = torch.ones([dim, dim]).to(device).squeeze()
             true_transition_mult_online1 = torch.ones([dim, dim]).to(device).squeeze()
             true_transition_mult_online2 = torch.ones([dim, dim]).to(device).squeeze()
-            init_transition_mult = torch.diag(0.5 * torch.ones([dim])).to(device).squeeze()
+            init_transition_mult = torch.diag(1.0 * torch.ones([dim])).to(device).squeeze()
             for i in range(dim):
                 for j in range(dim):
                     true_transition_mult[i, j] = 0.42 ** (abs(i - j) + 1)
-                    true_transition_mult_online1[i, j] = 0.1 ** (abs(i - j) + 1)
+                    true_transition_mult_online1[i, j] = 0.2 ** (abs(i - j) + 1)
                     true_transition_mult_online2[i, j] = 0.40 ** (abs(i - j) + 1)
 
                     # init_transition_mult[i, j] = 0.42 ** (abs(i - j) + 1)
         else:
-            true_transition_mult = (0.1 * torch.ones(dim)).to(device).squeeze()
-            true_transition_mult_online1 = (0.15 * torch.ones(dim)).to(device).squeeze()
+            true_transition_mult = (0.9 * torch.ones(dim)).to(device).squeeze()
+            true_transition_mult_online1 = (0.3 * torch.ones(dim)).to(device).squeeze()
             true_transition_mult_online2 = (0.7 * torch.ones(dim)).to(device).squeeze()
-            init_transition_mult = (0.5 * torch.ones(dim)).to(device).squeeze()
+            init_transition_mult = (1.0 * torch.ones(dim)).to(device).squeeze()
 
         transition_scale = torch.eye(dim).to(device).squeeze()
-        true_emission_mult = (0.2 * torch.ones(dim)).to(device).squeeze()
-        true_emission_mult_online1 = (0.1 * torch.ones(dim)).to(device).squeeze()
+        true_emission_mult = (0.5 * torch.ones(dim)).to(device).squeeze()
+        true_emission_mult_online1 = (0.8 * torch.ones(dim)).to(device).squeeze()
         true_emission_mult_online2 = (0.7 * torch.ones(dim)).to(device).squeeze()
-        init_emission_mult = (0.5 * torch.ones(dim)).to(device).squeeze()
+        init_emission_mult = (1.0 * torch.ones(dim)).to(device).squeeze()
 
         init_proposal_scale_0 = 0.1 * torch.ones(dim).to(device)  # (0.1*torch.eye(dim)).to(device).squeeze()
         init_proposal_scale_t = 0.1 * torch.ones(dim).to(device)  # (0.1*torch.eye(dim)).to(device).squeeze()
@@ -148,24 +148,24 @@ class TestModels(unittest.TestCase):
 
         num_timesteps = 51
         num_timesteps_online = 10
-        total_timestep_online = 5000
+        total_timestep_online = 10000
         num_test_obs = 10
         test_inference_num_particles = 100
         saving_interval = 10
         logging_interval = 10
         batch_size = 10
         batch_size_online = 1
-        num_iterations = 50
-        num_iterations_online = 50
+        num_iterations = 200
+        num_iterations_online = 1000
         num_particles = 100
         num_experiments = 1
-        num_of_flows = [1]
+        num_of_flows = []
         labelled_ratio = 0.01
         flow_types = ['nvp']
-        lr = 0.005
+        lr = 0.05
 
         algorithms =  ['cnf-dpf-'+flow_type+'-'+str(num_of_flows[i]) for i in range(len(num_of_flows))
-                       for flow_type in flow_types] #+['aesmc']#['bootstrap']# ['pfrnn']#
+                       for flow_type in flow_types] +['aesmc']#['bootstrap']# ['pfrnn']#
         colors = {'aesmc': 'red',
                   'bootstrap':'green',
                   'cnf-dpf-nvp-1': 'blue',

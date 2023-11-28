@@ -71,6 +71,7 @@ def train(dataloader_online1, dataloader_online2, dataloader, num_particles, alg
             optimizer_proposal.zero_grad()
             loss, data_pre_step = losses.get_loss([data_current,online_state], training_stage, observations, num_particles, algorithm,
                                    initial, transition, emission, proposal, args = args, true_latents=true_latents)
+            online_state = 'continue'
             data_current = data_pre_step
             if args.trainType != 'DPF':
                 loss.backward()
