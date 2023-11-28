@@ -113,8 +113,8 @@ class DPF_base(nn.Module):
             if self.param.learnType == 'offline':
                 total_loss = loss_sup
             elif self.param.learnType == 'online':
+                print(loss_sup.detach().cpu().numpy(), elbo_value)
                 if self.param.onlineType == 'elbo':
-                    print(loss_sup.detach().cpu().numpy(), elbo_value)
                     total_loss = -1e-2*torch.mean(elbo)
                 elif self.param.onlineType == 'fix':
                     total_loss = 0
@@ -214,13 +214,20 @@ class DPF_base(nn.Module):
             if self.param.learnType == 'online':
                 action = actions[:, step: step+1, :].squeeze()
             # index_p shape: (batch, num_p)
-            if first_step:
-                ancestral_indices.append(self.sample_ancestral_index(particle_probs))
-                particles_resampled = aesmc.state.resample(particles, ancestral_indices[-1])
-                first_step = False
+            index_p = (torch.arange(self.num_particle) + self.num_particle * torch.arange(batch_size)[:, None].repeat(
+                (1, self.num_particle))).type(torch.int64).to(device)
+            ESS = torch.mean(1 / torch.sum(particle_probs ** 2, dim=-1))
+
+            if ESS < 0.5 * self.num_particle:
+                if first_step:
+                    ancestral_indices.append(self.sample_ancestral_index(particle_probs))
+                    particles_resampled = aesmc.state.resample(particles, ancestral_indices[-1])
+                    first_step = False
+                else:
+                    ancestral_indices.append(self.sample_ancestral_index(log_weights[-1]))
+                    particles_resampled = aesmc.state.resample(particles, ancestral_indices[-1])
             else:
-                ancestral_indices.append(self.sample_ancestral_index(particle_probs))
-                particles_resampled = aesmc.state.resample(particles, ancestral_indices[-1])
+                particles_resampled = particles
 
             particles_physic, noise = self.motion_update(particles_resampled, action, environment_state=None)
             if self.param.learnType == 'offline':
@@ -583,6 +590,10 @@ class DPF_base(nn.Module):
             for param in self.encoder.parameters():
                 param.requires_grad = False
             for param in self.decoder.parameters():
+                param.requires_grad = False
+            for param in self.cond_model.parameters():
+                param.requires_grad = False
+            for param in self.nf_dyn.parameters():
                 param.requires_grad = False
             # train tqdm(
             self.train()
