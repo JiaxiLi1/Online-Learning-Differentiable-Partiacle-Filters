@@ -14,7 +14,7 @@ from builds.build_maze import *
 from builds.build_disk import *
 from builds.build_house3d import *
 import cv2
-from resamplers.resamplers import resampler
+from resamplers.resamplers1 import resampler
 from losses import *
 from nf.cglow.CGlowModel import CondGlowModel
 from copy import deepcopy
@@ -216,18 +216,34 @@ class DPF_base(nn.Module):
             # index_p shape: (batch, num_p)
             index_p = (torch.arange(self.num_particle) + self.num_particle * torch.arange(batch_size)[:, None].repeat(
                 (1, self.num_particle))).type(torch.int64).to(device)
+
+
             ESS = torch.mean(1 / torch.sum(particle_probs ** 2, dim=-1))
 
             if ESS < 0.5 * self.num_particle:
-                if first_step:
-                    ancestral_indices.append(self.sample_ancestral_index(particle_probs))
-                    particles_resampled = aesmc.state.resample(particles, ancestral_indices[-1])
-                    first_step = False
+
+                if self.param.resampler_type == 'ot' or self.resampler_type == 'soft':
+
+                    applied_resampler = resampler(self.param)
+                    particles_resampled = applied_resampler(torch.unsqueeze(particles, -1), particle_probs)[
+                        0].squeeze()
                 else:
-                    ancestral_indices.append(self.sample_ancestral_index(log_weights[-1]))
+                    if first_step:
+                        weights_resample = particle_probs
+                        first_step = False
+                    else:
+                        weights_resample = particle_probs_resampled
+                    ancestral_indices.append(self.sample_ancestral_index(weights_resample))
                     particles_resampled = aesmc.state.resample(particles, ancestral_indices[-1])
+                temp=torch.ones(particle_probs.shape).to(device)
+                particle_probs_resampled = (temp/temp.shape[1]).to(device)
+                particle_probs_elbo = particle_probs_resampled.log()
             else:
                 particles_resampled = particles
+                particle_probs_resampled = particle_probs.log()
+                particle_probs_elbo = unnormalize_weight_next
+
+            unnormalize_weight_nu = torch.logsumexp(particle_probs_elbo, dim=1)
 
             particles_physic, noise = self.motion_update(particles_resampled, action, environment_state=None)
             if self.param.learnType == 'offline':
@@ -251,9 +267,12 @@ class DPF_base(nn.Module):
                                                                                     obs_feature=obs_feature,
                                                                                     encoder_flow=self.encoder_flow)
 
-            log_weights.append(prior_log + lki_log - propose_log)
+            particle_probs_resampled = particle_probs_resampled + lki_log + prior_log - propose_log
+            unnormalize_weight_next = particle_probs_resampled
+            unnormalize_weight_de = torch.logsumexp(unnormalize_weight_next, dim=1)
+            elbo += unnormalize_weight_de - unnormalize_weight_nu
             particles = propose_particle
-            particle_probs = log_weights[-1]
+            particle_probs = particle_probs_resampled
             obs_likelihood += particle_probs.mean()
             particle_probs = normalize_log_probs(particle_probs)+1e-12
 
@@ -280,10 +299,10 @@ class DPF_base(nn.Module):
                     jac_list = torch.cat([jac_list, jac[:, None]], dim=1)
                     prior_list = torch.cat([prior_list, prior_log[:, None]], dim=1)
 
-        temp = torch.logsumexp(torch.stack(log_weights, dim=0), dim=2) - \
-               np.log(self.num_particle)
-        log_marginal_likelihood = torch.sum(temp, dim=0)
-        return [obs_likelihood, particles, particle_probs, unnormalize_weight_next], log_marginal_likelihood, particle_list, particle_probs_list, noise_list, likelihood_list, init_weights_log, None, jac_list, prior_list, obs_likelihood
+        # temp = torch.logsumexp(torch.stack(log_weights, dim=0), dim=2) - \
+        #        np.log(self.num_particle)
+        # log_marginal_likelihood = torch.sum(temp, dim=0)
+        return [obs_likelihood, particles, particle_probs, unnormalize_weight_next], elbo, particle_list, particle_probs_list, noise_list, likelihood_list, init_weights_log, None, jac_list, prior_list, obs_likelihood
 
     def get_mask(self):
 
