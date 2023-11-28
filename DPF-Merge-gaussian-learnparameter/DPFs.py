@@ -105,11 +105,11 @@ class DPF_base(nn.Module):
             # total_loss = loss_sup - (elbo.mean() * self.param.elbo_ratio)
             elbo_value = elbo.mean().detach().cpu().numpy()
             if self.param.learnType == 'offline':
-                total_loss = -1e-2*torch.mean(elbo)#- (1e-2*elbo.mean() )
+                total_loss = loss_sup#- (1e-2*elbo.mean() )
             elif self.param.learnType == 'online':
+                print(loss_sup.detach().cpu().numpy(), elbo_value)
                 if self.param.onlineType == 'elbo':
-                    print(loss_sup.detach().cpu().numpy(), elbo_value)
-                    total_loss = - (elbo.mean())
+                    total_loss = -1e-2*torch.mean(elbo)
                 elif self.param.onlineType == 'fix':
                     total_loss = 0
                 elif self.param.onlineType == 'rmse':
@@ -202,8 +202,13 @@ class DPF_base(nn.Module):
                 t=1
                 continue
             # index_p shape: (batch, num_p)
-            ancestral_indices.append(self.sample_ancestral_index(log_weights[-1]))
-            particles_resampled = aesmc.state.resample(particles, ancestral_indices[-1])
+            if t!=1:
+                ancestral_indices.append(self.sample_ancestral_index(particle_probs))
+                particles_resampled = aesmc.state.resample(particles, ancestral_indices[-1])
+                t=1
+            else:
+                ancestral_indices.append(self.sample_ancestral_index(log_weights[-1]))
+                particles_resampled = aesmc.state.resample(particles, ancestral_indices[-1])
 
             # index_p = (torch.arange(self.num_particle)+self.num_particle* torch.arange(batch_size)[:, None].repeat((1, self.num_particle))).type(torch.int64).to(device)
             # ESS = torch.mean(1/torch.sum(particle_probs**2, dim=-1))
@@ -262,6 +267,7 @@ class DPF_base(nn.Module):
                 if self.NF:
                     prior_list = torch.cat([prior_list, transition_log_prob[:, None]], dim=1)
 
+        normalized_particle_weights = aesmc.math.normalize_log_probs(torch.stack(log_weights, dim=0)) + 1e-8
         temp = torch.logsumexp(torch.stack(log_weights, dim=0), dim=2) - \
                 np.log(self.num_particle)
         log_marginal_likelihood = torch.sum(temp, dim=0)
@@ -597,6 +603,8 @@ class DPF_base(nn.Module):
                 image = image
                 # Process in chunks of slice_size timesteps
                 for t in range(0, 100, slice_size):
+                    print('theta1:', self.transition.mult.flatten().cpu().detach().numpy()[0], 'theta2:',
+                          self.emission.mult.cpu().detach().numpy())
                     self.zero_grad()
                     # Slicing the state positions and observations
                     state_positions = state[:, t:min(t + slice_size, 100), :]
@@ -621,7 +629,7 @@ class DPF_base(nn.Module):
                     loss_alltime_list.append(loss_alltime[0])
                     # total_ae_loss.append(loss_ae.detach().cpu().numpy())
 
-                self.optim_scheduler.step()
+                # self.optim_scheduler.step()
             numpy_loss_alltime_list = [tensor.detach().cpu().numpy() for tensor in loss_alltime_list]
             np.savez(os.path.join('logs', run_id, "data", 'loss_alltime_list.npz'),
                      loss_alltime=numpy_loss_alltime_list,)

@@ -120,13 +120,20 @@ def supervised_loss(learnType, particle_list, particle_weight_list, true_state, 
     prediction = torch.sum(particle_list * particle_weight_list[:, :, :, None],
                           dim=2)  # the dataset has extra initial state
 
-    loss = torch.sqrt( torch.mean(torch.sum((prediction - true_state) ** 2, dim=-1))) # Rooted mean square error
-    loss_last = torch.sqrt( torch.mean( (torch.sum((prediction - true_state) ** 2, dim=-1)[:,-1])))
+    loss = torch.sqrt(torch.mean((prediction - true_state) ** 2))  # Rooted mean square error
+    loss_last = torch.sqrt(torch.mean((((prediction - true_state) ** 2)[:, -1])))
     if learnType == 'offline':
         return None, loss, loss_last, prediction
     if learnType == 'online':
-        loss_alltime = torch.abs(torch.sum((prediction - true_state), dim=-1))
+        loss_alltime = torch.abs((prediction - true_state))
         return loss_alltime, loss, loss_last, prediction
+    # loss = torch.sqrt( torch.mean(torch.sum((prediction - true_state) ** 2, dim=-1))) # Rooted mean square error
+    # loss_last = torch.sqrt( torch.mean( (torch.sum((prediction - true_state) ** 2, dim=-1)[:,-1])))
+    # if learnType == 'offline':
+    #     return None, loss, loss_last, prediction
+    # if learnType == 'online':
+    #     loss_alltime = torch.abs(torch.sum((prediction - true_state), dim=-1))
+    #     return loss_alltime, loss, loss_last, prediction
 
     # else:
     #     loss = torch.sqrt( torch.mean(torch.sum((prediction - true_state) ** 2, dim=-1)))

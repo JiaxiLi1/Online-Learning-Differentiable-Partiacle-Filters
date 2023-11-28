@@ -591,10 +591,10 @@ class DPF_base(nn.Module):
                 param.requires_grad = False
             for param in self.decoder.parameters():
                 param.requires_grad = False
-            for param in self.cond_model.parameters():
-                param.requires_grad = False
-            for param in self.nf_dyn.parameters():
-                param.requires_grad = False
+            # for param in self.cond_model.parameters():
+            #     param.requires_grad = False
+            # for param in self.nf_dyn.parameters():
+            #     param.requires_grad = False
             # train tqdm(
             self.train()
             total_sup_loss = []

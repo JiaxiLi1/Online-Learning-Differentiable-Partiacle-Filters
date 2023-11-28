@@ -154,8 +154,8 @@ if __name__ == "__main__":
         init_transition_mult = (1.0 * torch.ones(dim)).to(device).squeeze()
 
     transition_scale = torch.eye(dim).to(device).squeeze()
-    true_emission_mult = (0.5 * torch.ones(dim)).to(device).squeeze()
-    true_emission_mult_online = (0.8 * torch.ones(dim)).to(device).squeeze()
+    true_emission_mult = (0.8 * torch.ones(dim)).to(device).squeeze()
+    true_emission_mult_online = (0.1 * torch.ones(dim)).to(device).squeeze()
     init_emission_mult = (0.1 * torch.ones(dim)).to(device).squeeze()
 
     init_proposal_scale_0 = 0.1 * torch.ones(dim).to(device)  # (0.1*torch.eye(dim)).to(device).squeeze()
