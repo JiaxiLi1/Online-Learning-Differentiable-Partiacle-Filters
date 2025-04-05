@@ -1,6 +1,6 @@
 import aemath
 import state
-from resamplers.resamplers1 import resampler
+from resamplers.resamplers import resampler
 import numpy as np
 import torch
 import copy
