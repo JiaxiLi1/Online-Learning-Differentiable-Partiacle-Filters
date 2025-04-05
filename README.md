@@ -94,7 +94,7 @@ python test_losses.py --trainType [online/offline] --resampler_type [multinomial
 If you find this code useful in your research, please consider citing:
 
 ```bibtex
-@inproceedings{li2023,
+@Inproceedings{li2023,
   title={Learning Differentiable Particle Filter on the Fly},
   author={Li, Jiaxi, Chen, Xiongjie and Li, Yunpeng},
   booktitle={57th Asilomar Conference on Signals, Systems, and Computers},
