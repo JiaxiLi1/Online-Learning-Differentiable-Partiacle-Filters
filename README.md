@@ -29,15 +29,11 @@ Each folder is self-contained with the following structure:
 - CUDA-compatible GPU recommended (experiments were conducted on NVIDIA GeForce RTX 3090)
 ### Setup
 ```bash
-# Create and activate a Python 3.7 environment
 conda create -n ol-dpf python=3.7
 conda activate ol-dpf
-# Clone the repository
 git clone https://github.com/JiaxiLi1/Online-Learning-Differentiable-Partiacle-Filters.git
 cd Online-Learning-Differentiable-Partiacle-Filters
-# Navigate to the experiment directory of interest
 cd OL-DPF-gaussian  # or cd OL-DPF-tracking
-# Install required packages
 pip install .
 ```
 ## Experiments
@@ -46,9 +42,7 @@ The repository supports experiments on two types of datasets:
 ### 1. Multivariate Linear Gaussian Model
 To reproduce the results from the paper:
 ```bash
-# Navigate to the Gaussian model directory
 cd OL-DPF-gaussian
-# Run the experiment to reproduce paper results
 python test_losses.py --resampler_type normal --device cuda --trainType online --NF-cond --measurement CRNVP --NF-dyn --num_dim 2
 ```
 
@@ -59,9 +53,7 @@ Controlled parameters:
 ### 2. Non-linear Object Tracking Model
 To reproduce the results from the paper:
 ```bash
-# Navigate to the tracking model directory
 cd OL-DPF-tracking
-# Run the experiment to reproduce paper results
 python test_losses.py --resampler_type normal --device cuda --trainType online --NF-cond --measurement CRNVP --NF-dyn
 ```
 
