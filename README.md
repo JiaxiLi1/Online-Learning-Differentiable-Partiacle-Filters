@@ -35,6 +35,7 @@ git clone https://github.com/JiaxiLi1/Online-Learning-Differentiable-Partiacle-F
 cd Online-Learning-Differentiable-Partiacle-Filters
 cd OL-DPF-gaussian  # or cd OL-DPF-tracking
 pip install .
+pip install configargparse
 ```
 ## Experiments
 The repository supports experiments on two types of datasets:
