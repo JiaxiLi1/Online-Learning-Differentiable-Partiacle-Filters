@@ -7,10 +7,11 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.nn.init as init
 import aemath
+import sys
 import state
-import math
-import train
 import inference
+import train
+sys.path.append('../test/')
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
 def log_prob(distribution, value):
@@ -770,11 +771,9 @@ class FCNN(nn.Module):
         super().__init__()
         self.network = nn.Sequential(
             nn.Linear(in_dim, hidden_dim),
-            # nn.Tanh(),, dropout_rate=0.5
-            # nn.Dropout(dropout_rate),  # Adding dropout
-            # nn.Linear(16, 16),
+            # nn.Tanh(),
+            # nn.Linear(hidden_dim, hidden_dim),
             nn.Tanh(),
-            # nn.Dropout(dropout_rate),  # Adding another dropout layer
             nn.Linear(hidden_dim, out_dim),
         )
 
@@ -905,9 +904,9 @@ class Radial(nn.Module):
         self.beta = nn.Parameter(torch.Tensor(1))
 
     def reset_parameters(self, dim):
-        init.uniform_(self.x0, -math.sqrt(1/dim), math.sqrt(1/dim))
-        init.uniform_(self.log_alpha, -math.sqrt(1/dim), math.sqrt(1/dim))
-        init.uniform_(self.beta, -math.sqrt(1/dim), math.sqrt(1/dim))
+        init.uniform_(self.x0, -aemath.sqrt(1/dim), aemath.sqrt(1/dim))
+        init.uniform_(self.log_alpha, -aemath.sqrt(1/dim), aemath.sqrt(1/dim))
+        init.uniform_(self.beta, -aemath.sqrt(1/dim), aemath.sqrt(1/dim))
 
     def forward(self, x):
         """
@@ -1211,9 +1210,7 @@ class RealNVP(nn.Module):
         s2_transformed = self.s2(upper)
         lower = t2_transformed + lower if self.translate else t2_transformed + lower * torch.exp(s2_transformed)
         z = torch.cat([lower, upper], dim=1)
-        # log_det = torch.zeros_like(torch.sum(s2_transformed, dim=-1)) if self.translate else torch.sum(s1_transformed, dim=1) +  torch.sum(s2_transformed, dim=1)
-        log_det = torch.sum(-s1_transformed, dim=1) + \
-                  torch.sum(-s2_transformed, dim=1)
+        log_det = torch.zeros_like(torch.sum(s2_transformed, dim=-1)) if self.translate else torch.sum(s1_transformed, dim=1) +  torch.sum(s2_transformed, dim=1)
         return z, log_det
 
     def inverse(self, z):
@@ -1225,9 +1222,7 @@ class RealNVP(nn.Module):
         s1_transformed = self.s1(lower)
         upper = (upper - t1_transformed) * torch.exp(-s1_transformed) if self.translate else upper - t1_transformed
         x = torch.cat([lower, upper], dim=1)
-        # log_det = torch.zeros_like(torch.sum(s2_transformed, dim=-1)) if self.translate else torch.sum(-s1_transformed, dim=1) +  torch.sum(-s2_transformed, dim=1)
-        log_det = torch.sum(-s1_transformed, dim=1) + \
-                  torch.sum(-s2_transformed, dim=1)
+        log_det = torch.zeros_like(torch.sum(s2_transformed, dim=-1)) if self.translate else torch.sum(-s1_transformed, dim=1) +  torch.sum(-s2_transformed, dim=1)
         return x, log_det
 
 
@@ -1363,7 +1358,7 @@ class TrainingStats(object):
         #     latents_test=self.test_obs[0]
         #     latents_test = [latent_test.to(self.device).unsqueeze(-1) if len(latent_test.shape) == 1 else latent_test.to(self.device)
         #                for latent_test in latents_test]
-        #     inference_result, _ = aesmc.inference.infer(
+        #     inference_result, _ = inference.infer(
         #         [None,None],self.algorithm, self.test_obs[1], self.initial,
         #         transition, emission, proposal,
         #         self.test_inference_num_particles, args=self.args, true_latents=latents_test,
@@ -1422,12 +1417,12 @@ class TrainingStats(object):
             #     latents = self.test_obs_online1[0]
             #     latents = [latent.to(self.device).unsqueeze(-1) if len(latent.shape) == 1 else latent.to(self.device)
             #                for latent in latents]
-            #     inference_result, _ = aesmc.inference.infer(
+            #     inference_result, _ = inference.infer(
             #         [None,None],self.algorithm, self.test_obs_online1[1], self.initial,
             #         transition, emission, proposal,
             #         self.test_inference_num_particles, args=self.args, true_latents=latents,
             #         return_log_marginal_likelihood=True, measurement=args.measurement)
-            #     normalized_weights = aesmc.math.normalize_log_probs(
+            #     normalized_weights = math.normalize_log_probs(
             #         torch.stack(inference_result['log_weights'], dim=0)) + 1e-8
             #     self.normalized_log_weights_history.append(normalized_weights.cpu().detach().numpy())
             #     # self.loss_history.append(inference_result['log_marginal_likelihood'].cpu().detach().numpy())
@@ -1449,12 +1444,12 @@ class TrainingStats(object):
             #     latents = self.test_obs_online2[0]
             #     latents = [latent.to(self.device).unsqueeze(-1) if len(latent.shape) == 1 else latent.to(self.device)
             #                for latent in latents]
-            #     inference_result = aesmc.inference.infer(
+            #     inference_result = inference.infer(
             #         self.algorithm, self.test_obs_online2[1], self.initial,
             #         transition, emission, proposal,
             #         self.test_inference_num_particles, args=self.args, true_latents=latents,
             #         return_log_marginal_likelihood=True)
-            #     normalized_weights = aesmc.math.normalize_log_probs(
+            #     normalized_weights = math.normalize_log_probs(
             #         torch.stack(inference_result['log_weights'], dim=0)) + 1e-8
             #     self.normalized_log_weights_history.append(normalized_weights.cpu().detach().numpy())
             #     # self.loss_history.append(inference_result['log_marginal_likelihood'].cpu().detach().numpy())

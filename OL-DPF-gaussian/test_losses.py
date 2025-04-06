@@ -85,7 +85,7 @@ class TestModels():
 
         emission_scale = ((0.1**0.5)* torch.eye(dim)).to(device).squeeze()
 
-        num_timesteps = 100
+        num_timesteps = 50
         num_timesteps_online = 10
         num_iterations_online = 500
         total_timestep_online = num_timesteps_online * num_iterations_online
@@ -95,12 +95,10 @@ class TestModels():
         logging_interval = 10
         batch_size = 10
         batch_size_online = 1
-        num_iterations = 3
-        num_iterations_val = 1
-        num_iterations_test = 1
+        num_iterations = 50
 
         num_particles = 100
-        num_experiments = args.num_exp
+        num_experiments = 50
         num_of_flows = [1]
         labelled_ratio = 0.01
         flow_types = ['nvp']
@@ -147,29 +145,17 @@ class TestModels():
                     lgssm.Emission(true_emission_mult, emission_scale).to(device),
                     num_timesteps, batch_size, num_iterations, num_particles, dim)
 
-                _, dataloader_val = train.get_synthetic_dataloader(
-                    lgssm.Initial(initial_loc, initial_scale).to(device),
-                    lgssm.Transition(true_transition_mult, transition_scale).to(device),
-                    lgssm.Emission(true_emission_mult, emission_scale).to(device),
-                    num_timesteps, batch_size, num_iterations_val, num_particles, dim)
+                dataloader_online1 = train.get_synthetic_dataloader_online(
+                    lgssm.Initial(initial_loc_online, initial_scale_online).to(device),
+                    lgssm.Transition(true_transition_mult_online1, transition_scale).to(device),
+                    lgssm.Emission(true_emission_mult_online1, emission_scale).to(device),
+                    num_timesteps_online, batch_size_online, total_timesteps=total_timestep_online)
 
-                _, dataloader_test = train.get_synthetic_dataloader(
-                    lgssm.Initial(initial_loc, initial_scale).to(device),
-                    lgssm.Transition(true_transition_mult, transition_scale).to(device),
-                    lgssm.Emission(true_emission_mult, emission_scale).to(device),
-                    num_timesteps, batch_size, num_iterations_test, num_particles, dim)
-
-                # dataloader_online1 = train.get_synthetic_dataloader_online(
-                #     lgssm.Initial(initial_loc_online, initial_scale_online).to(device),
-                #     lgssm.Transition(true_transition_mult_online1, transition_scale).to(device),
-                #     lgssm.Emission(true_emission_mult_online1, emission_scale).to(device),
-                #     num_timesteps_online, batch_size_online, total_timesteps=total_timestep_online)
-                training_stats = None
-                    # lgssm.TrainingStats(
-                    # true_transition_mult_online1, true_emission_mult_online1, true_transition_mult_online2, true_emission_mult_online2, initial_loc, initial_scale, true_transition_mult,
-                    # transition_scale, true_emission_mult, emission_scale,
-                    # num_timesteps, num_test_obs, test_inference_num_particles,
-                    # saving_interval, logging_interval,algorithm=algorithm, args = args, num_iterations=num_iterations)
+                training_stats = lgssm.TrainingStats(
+                    true_transition_mult_online1, true_emission_mult_online1, true_transition_mult_online2, true_emission_mult_online2, initial_loc, initial_scale, true_transition_mult,
+                    transition_scale, true_emission_mult, emission_scale,
+                    num_timesteps, num_test_obs, test_inference_num_particles,
+                    saving_interval, logging_interval,algorithm=algorithm, args = args, num_iterations=num_iterations)
                 Initial_dist = lgssm.Initial(initial_loc, initial_scale).to(device)
                 if args.NF_dyn:
                     n_sequence, hidden_size, init_var = 1, dim, 0.01
@@ -241,8 +227,7 @@ class TestModels():
                 else:
                     raise ValueError('Please select an algorithm from {aesmc, cnf-dpf, bootstrap}.')
                 rmse_plot, elbo_plot, rmse_box_plot = train.train(initial_state=initial_particles.detach(),
-                            dataloader_val=dataloader_val,
-                            dataloader_test=dataloader_test,
+                            dataloader_online1=dataloader_online1,
                             dataloader=dataloader,
                             num_particles=num_particles,
                             algorithm=algorithm,
@@ -251,7 +236,7 @@ class TestModels():
                             emission=Emission_dist,
                             # proposal=lgssm.Proposal(optimal_proposal_scale_0,optimal_proposal_scale_t, device).to(device),
                             proposal = proposal,
-                            num_epochs=args.num_epochs,
+                            num_epochs=1,
                             num_iterations_per_epoch=num_iterations,
                             num_iterations_per_epoch_online=num_iterations_online,
                             optimizer_algorithm=torch.optim.AdamW,
@@ -280,7 +265,7 @@ class TestModels():
             elbo_recorder = np.array(elbo_recorder)
             all_loss_recorder = np.array(all_loss_recorder)
 
-            folder_name = f"linear_{dim}_lr_{lr}_type_{args.trainType}_label_ratio_{args.labelled_ratio}"
+            folder_name = f"linear_dim_{dim}_lr_{lr}_type_{args.trainType}"
             folder_path = os.path.join("logs", folder_name)
             os.makedirs(folder_path, exist_ok=True)
             np.savez(os.path.join(folder_path, "results.npz"),

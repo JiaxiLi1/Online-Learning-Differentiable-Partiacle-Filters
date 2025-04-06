@@ -1,6 +1,13 @@
-import losses
-import statistics
+from aesmc import losses
+from aesmc import statistics
+import os
+# from pathlib import Path
 import itertools
+import sys
+# script_path = Path(__file__).resolve()
+# sys.path.append(str(script_path))
+# sys.path.append(str(script_path.parent))
+# print(sys.path)
 import torch.nn as nn
 import torch.utils.data
 import numpy as np
@@ -42,7 +49,7 @@ def create_mask(time_steps, batch_size, labelled_ratio):
 
     return mask
 
-def train(initial_state, dataloader_online1, dataloader, num_particles, algorithm, initial, transition, emission,
+def train(initial_state, dataloader_val, dataloader_test, dataloader, num_particles, algorithm, initial, transition, emission,
           proposal, num_epochs, num_iterations_per_epoch=None, num_iterations_per_epoch_online=None,
           optimizer_algorithm=torch.optim.Adam, optimizer_kwargs={},
           callback=None, args=None):
@@ -51,76 +58,90 @@ def train(initial_state, dataloader_online1, dataloader, num_particles, algorith
     parameters_proposal = get_chained_params(proposal)
     optimizer_model = optimizer_algorithm(parameters_model, **optimizer_kwargs)
     optimizer_proposal = optimizer_algorithm(parameters_proposal, **optimizer_kwargs)
+    rmse_plot = []
+    elbo_plot = []
+    rmse_box_plot = []
+
+    mask = create_mask(100, 10, args.labelled_ratio).to(device)
 
     for epoch_idx in range(num_epochs):
-        training_stage = 'offline'
-        print(training_stage)
+        rmse_temp = []
+        elbo_temp = []
         for epoch_iteration_idx, latents_and_observations in enumerate(dataloader):
             true_latents = latents_and_observations[0]
             true_latents = [true_latent.to(device).detach().unsqueeze(-1) if len(true_latent.shape)==1 else true_latent.to(device).detach()
                             for true_latent in true_latents]
             observations = latents_and_observations[1]
             observations = [observation.to(device).detach() for observation in observations]
-            if num_iterations_per_epoch is not None:
-                if epoch_iteration_idx == num_iterations_per_epoch:
-                    break
             optimizer_model.zero_grad()
             optimizer_proposal.zero_grad()
-            loss, data_pre_step, rmse_list, elbo, loss_rmse = losses.get_loss([None, None, initial_state],
-                                                                              training_stage, observations,
-                                                                              num_particles, algorithm,
-                                                                              initial, transition, emission, proposal,
-                                                                              args=args, true_latents=true_latents,
-                                                                              measurement=args.measurement)
+            loss, data_pre_step, rmse_list, elbo, loss_rmse = losses.get_loss(mask, initial_state.detach(), observations, num_particles, algorithm,
+                                   initial, transition, emission, proposal, args = args, true_latents=true_latents, measurement = args.measurement)
             loss.backward()
+            rmse_temp.append(loss_rmse.detach().cpu().numpy())
+            elbo_temp.append(elbo.detach().cpu().numpy())
             optimizer_model.step()
             optimizer_proposal.step()
 
-            if callback is not None:
-                callback(initial_state, epoch_idx, epoch_iteration_idx, loss, initial,
-                         transition, emission, proposal, stage=0, args = args)
+        print('train', 'epoch', epoch_idx + 1, 'rmse', np.mean(rmse_temp), 'elbo', np.mean(elbo_temp))
+        rmse_temp = []
+        elbo_temp = []
+        with torch.no_grad():
+            for epoch_iteration_idx_val, latents_and_observations in enumerate(dataloader_val):
+                true_latents = latents_and_observations[0]
+                true_latents = [
+                    true_latent.to(device).detach().unsqueeze(-1) if len(
+                        true_latent.shape) == 1 else true_latent.to(
+                        device).detach()
+                    for true_latent in true_latents]
+                observations = latents_and_observations[1]
+                observations = [observation.to(device).detach() for observation in observations]
 
-        training_stage = 'online'
-        online_state = 'start'
-        rmse_plot = []
-        elbo_plot = []
-        rmse_box_plot = []
-        data_current = 0.0
-        print(training_stage)
+                optimizer_model.zero_grad()
+                optimizer_proposal.zero_grad()
+                loss, data_pre_step, rmse_list, elbo, loss_rmse = losses.get_loss(mask, initial_state.detach(),
+                                                                                  observations,
+                                                                                  num_particles, algorithm,
+                                                                                  initial, transition, emission,
+                                                                                  proposal, args=args,
+                                                                                  true_latents=true_latents,
+                                                                                  measurement=args.measurement)
+                elbo_save = elbo.detach().cpu().numpy()
+                rmse_save = loss_rmse.detach().cpu().numpy()
+                rmse_temp.append(rmse_save)
+                elbo_temp.append(elbo_save)
+            mean_rmse = np.mean(rmse_temp)
+            mean_elbo = np.mean(elbo_temp)
+            rmse_plot.append(mean_rmse)
+            elbo_plot.append(mean_elbo)
+            print('val', 'epoch', epoch_idx + 1, 'rmse', mean_rmse, 'elbo', mean_elbo)
 
-        for epoch_iteration_idx, latents_and_observations in enumerate(dataloader_online1):
+    with torch.no_grad():
+        rmse_temp = []
+        elbo_temp = []
+        for epoch_iteration_idx, latents_and_observations in enumerate(dataloader_test):
             true_latents = latents_and_observations[0]
-            true_latents = [x.unsqueeze(0) for x in true_latents]
             true_latents = [
-                true_latent.to(device).unsqueeze(-1) if len(true_latent.shape) == 1 else true_latent.to(device)
+                true_latent.to(device).detach().unsqueeze(-1) if len(true_latent.shape) == 1 else true_latent.to(
+                    device).detach()
                 for true_latent in true_latents]
             observations = latents_and_observations[1]
-            observations = [x.unsqueeze(0) for x in observations]
-            observations = [observation.to(device) for observation in observations]
-            if num_iterations_per_epoch_online is not None:
-                if epoch_iteration_idx == num_iterations_per_epoch_online:
-                    break
+            observations = [observation.to(device).detach() for observation in observations]
 
             optimizer_model.zero_grad()
             optimizer_proposal.zero_grad()
-            loss, data_pre_step, rmse_list, elbo, loss_rmse = losses.get_loss(
-                [data_current, online_state, initial_state], training_stage, observations, num_particles, algorithm,
-                initial, transition, emission, proposal, args=args, true_latents=true_latents,
-                measurement=args.measurement)
+            loss, data_pre_step, rmse_list, elbo, loss_rmse = losses.get_loss(mask, initial_state.detach(), observations, num_particles, algorithm,
+                                   initial, transition, emission, proposal, args = args, true_latents=true_latents, measurement = args.measurement)
             elbo_save = elbo.detach().cpu().numpy()
             rmse_save = loss_rmse.detach().cpu().numpy()
-            rmse_plot.append(rmse_save)
-            elbo_plot.append(elbo_save)
+            rmse_temp.append(rmse_save)
+            elbo_temp.append(elbo_save)
             rmse_box_plot.append(rmse_list)
-            if (epoch_iteration_idx + 1) % 10 == 0:
-                print('online', 'iteration', epoch_iteration_idx + 1, 'rmse', rmse_save, 'elbo', elbo_save)
-            online_state = 'continue'
-            data_current = data_pre_step
-            if args.trainType != 'pretrain':
-                loss.backward()
-                optimizer_model.step()
-                optimizer_proposal.step()
-
+        mean_rmse = np.mean(rmse_temp)
+        mean_elbo = np.mean(elbo_temp)
+        rmse_plot.append(mean_rmse)
+        elbo_plot.append(mean_elbo)
+        print('test', 'rmse', mean_rmse, 'elbo', mean_elbo)
 
     return rmse_plot, elbo_plot, [tensor.detach().cpu().numpy() for tensor in rmse_box_plot]
 

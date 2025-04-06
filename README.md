@@ -1,20 +1,12 @@
 # Online Learning Differentiable Particle Filters (OL-DPF)
-
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-
 This repository contains the official implementation of the paper:
-
 **"Learning Differentiable Particle Filter on the Fly"** (57th Asilomar Conference on Signals, Systems, and Computers, 2023)
-
 ## Repository Structure
-
 The repository contains two main folders, each corresponding to a different experimental setup:
-
 ### OL-DPF-gaussian (Multivariate Linear Gaussian Model)
 ### OL-DPF-tracking (Non-linear Object Tracking Model)
-
 Each folder is self-contained with the following structure:
-
 ```
 .
 ├── arguments.py        # Parameter configuration
@@ -30,69 +22,60 @@ Each folder is self-contained with the following structure:
 │   └── resamplers.py   # Particle resampling implementations
 └── setup.py            # Installation script
 ```
-
 ## Installation
-
 ### Environment Requirements
 - Ubuntu 22.04 LTS (or other Linux distributions)
 - Python 3.7
 - CUDA-compatible GPU recommended (experiments were conducted on NVIDIA GeForce RTX 3090)
-
 ### Setup
 ```bash
 # Create and activate a Python 3.7 environment
 conda create -n ol-dpf python=3.7
 conda activate ol-dpf
-
 # Clone the repository
 git clone https://github.com/JiaxiLi1/Online-Learning-Differentiable-Partiacle-Filters.git
 cd Online-Learning-Differentiable-Partiacle-Filters
-
 # Navigate to the experiment directory of interest
 cd OL-DPF-gaussian  # or cd OL-DPF-tracking
-
 # Install required packages
 pip install .
 ```
-
 ## Experiments
-
 The repository supports experiments on two types of datasets:
 
 ### 1. Multivariate Linear Gaussian Model
-
+To reproduce the results from the paper:
 ```bash
 # Navigate to the Gaussian model directory
 cd OL-DPF-gaussian
-
-# Run the experiment
-python test_losses.py --trainType [online/offline] --num_dim [2/5/10] --resampler_type [multinomial/stratified/systematic] --NF-dyn [True/False] --NF-cond [True/False] --device [cuda/cpu]
+# Run the experiment to reproduce paper results
+python test_losses.py --resampler_type normal --device cuda --trainType online --NF-cond --measurement CRNVP --NF-dyn --num_dim 2
 ```
 
-### 2. Non-linear Object Tracking Model
+Controlled parameters:
+- `num_dim`: Dimension of the model (we tested num_dim=2, 5, 10)
+- `trainType`: Choose from 'pretrain' (Pre-trained DPF), 'online' (OL-DPF), or 'supervised' (DPF(oracle))
 
+### 2. Non-linear Object Tracking Model
+To reproduce the results from the paper:
 ```bash
 # Navigate to the tracking model directory
 cd OL-DPF-tracking
-
-# Run the experiment
-python test_losses.py --trainType [online/offline] --resampler_type [multinomial/stratified/systematic] --NF-dyn [True/False] --NF-cond [True/False] --device [cuda/cpu] --measurement [type]
+# Run the experiment to reproduce paper results
+python test_losses.py --resampler_type normal --device cuda --trainType online --NF-cond --measurement CRNVP --NF-dyn
 ```
 
-### Configuration Parameters
+Controlled parameters:
+- `trainType`: Choose from 'pretrain' (Pre-trained DPF), 'online' (OL-DPF), or 'supervised' (DPF(oracle))
 
-- `trainType`: Selects between online or offline
-- `num_dim`: Dimensionality of the latent state and observation vectors (for Gaussian model, we tested d=2, 5, 10)
+### Other Parameters
 - `resampler_type`: Particle resampling method
-- `NF-dyn`: Enable/disable normalizing flows for the dynamic model
-- `NF-cond`: Enable/disable normalizing flows for the proposal distribution
-- `device`: Computational device (cuda for GPU, cpu for CPU)
+- `NF-dyn`: Enable normalizing flows for the dynamic model
+- `NF-cond`: Enable normalizing flows for the proposal distribution
 - `measurement`: Measurement model type
 
 ## Citation
-
 If you find this code useful in your research, please consider citing:
-
 ```bibtex
 @Inproceedings{li2023,
   title={Learning Differentiable Particle Filter on the Fly},
@@ -101,9 +84,7 @@ If you find this code useful in your research, please consider citing:
   year={2023}
 }
 ```
-
 ## Acknowledgments
-
 This codebase builds upon the implementation from:
 ```bibtex
 @Inproceedings{le2018auto,
@@ -115,7 +96,5 @@ This codebase builds upon the implementation from:
 	year={2018}
 }
 ```
-
 ## License
-
 This project is licensed under the MIT License - see the LICENSE file for details.

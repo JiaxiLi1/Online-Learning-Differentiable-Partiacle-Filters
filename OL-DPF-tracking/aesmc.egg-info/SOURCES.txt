@@ -12,8 +12,3 @@ aesmc.egg-info/SOURCES.txt
 aesmc.egg-info/dependency_links.txt
 aesmc.egg-info/requires.txt
 aesmc.egg-info/top_level.txt
-test/test_inference.py
-test/test_losses.py
-test/test_math.py
-test/test_state.py
-test/test_statistics.py

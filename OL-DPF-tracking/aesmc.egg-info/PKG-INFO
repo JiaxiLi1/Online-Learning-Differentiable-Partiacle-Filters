@@ -1,10 +1,7 @@
-Metadata-Version: 1.0
+Metadata-Version: 2.1
 Name: aesmc
 Version: 0.1.0
 Summary: Library for Auto-Encoding Sequential Monte Carlo
-Home-page: UNKNOWN
-Author: UNKNOWN
-Author-email: UNKNOWN
-License: UNKNOWN
-Description: UNKNOWN
-Platform: UNKNOWN
+Requires-Dist: torch
+Requires-Dist: pykalman
+Requires-Dist: matplotlib

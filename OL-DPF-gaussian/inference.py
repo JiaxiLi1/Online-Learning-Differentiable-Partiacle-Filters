@@ -8,11 +8,11 @@ import torch
 import copy
 
 
-def infer(mask, initial_states, inference_algorithm, observations, initial, transition, emission,
+def infer(online_data, inference_algorithm, observations, initial, transition, emission,
           proposal, num_particles, return_log_marginal_likelihood=False,
           return_latents=False, return_original_latents=True,
           return_log_weight=True, return_log_weights=True,
-          return_ancestral_indices=False, args=None, true_latents=None, measurement = 'gaussian'):
+          return_ancestral_indices=False, args=None, true_latents=None, online_learning=False, measurement = 'gaussian'):
     """Perform inference on a state space model using either sequential Monte
     Carlo or importance sampling.
 
@@ -77,8 +77,13 @@ def infer(mask, initial_states, inference_algorithm, observations, initial, tran
             'inference_algorithm must be either is or smc. currently = {}'
             .format(inference_algorithm))
 
-    batch_size = next(iter(observations[0].values())).size(0) \
-        if isinstance(observations[0], dict) else observations[0].size(0)
+    if online_learning == False:
+        batch_size = next(iter(observations[0].values())).size(0) \
+            if isinstance(observations[0], dict) else observations[0].size(0)
+    else:
+        # batch_size = 1
+        batch_size = next(iter(observations[0].values())).size(0) \
+            if isinstance(observations[0], dict) else observations[0].size(0)
 
     if return_original_latents or return_latents:
         original_latents = []
@@ -86,19 +91,67 @@ def infer(mask, initial_states, inference_algorithm, observations, initial, tran
         ancestral_indices = []
     log_weights = []
     log_weights_true = []
-    if type(proposal).__name__ == 'Proposal_cnf':
-        latent, proposal_log_prob = proposal.sample(observations=observations, time=0, batch_size=batch_size, num_particles=num_particles)
-    else:
-        proposal_dist = proposal(time=0, observations=observations)
-        latent = state.sample(proposal_dist, batch_size, num_particles)
-        proposal_log_prob = state.log_prob(proposal_dist, latent)
-    latent = initial_states
-    latents_bar = [latent]
-    proposal_log_prob[...] = 1.0
-    if return_original_latents or return_latents:
-        original_latents.append(latent)
+    (data_current, online_state, initial_state) = online_data
+    if online_state == 'start' or online_state == None:
+        if type(proposal).__name__ == 'Proposal_cnf':
+            latent, proposal_log_prob = proposal.sample(observations=observations, time=0, batch_size=batch_size,
+                                                        num_particles=num_particles)
+        else:
+            proposal_dist = proposal(time=0, observations=observations)
+            latent = state.sample(proposal_dist, batch_size, num_particles)
+            proposal_log_prob = state.log_prob(proposal_dist, latent)
+        if online_state == None:
+            latent = initial_state
+        else:
+            latent = initial_state[0:1, :, :]
+        latents_bar = [latent]
+        proposal_log_prob[...] = 1.0
+        if return_original_latents or return_latents:
+            original_latents.append(latent)
 
-    log_weights.append(proposal_log_prob)
+        log_weights.append(proposal_log_prob)
+    else:
+        state_pre, weights_pre = data_current
+        if inference_algorithm == 'smc':
+            if args.resampler_type == 'ot' or args.resampler_type == 'soft':
+                applied_resampler = resampler(args)
+                particle_weights = aemath.normalize_log_probs(weights_pre)+1e-8
+                previous_latents_bar = [
+                    applied_resampler(torch.unsqueeze(state_pre, -1), particle_weights)[0].squeeze()]
+            else:
+                ancestral_indices.append(sample_ancestral_index(weights_pre))
+                previous_latents_bar = [
+                    state.resample(state_pre, ancestral_indices[-1])]
+
+        if type(proposal).__name__ == 'Proposal_cnf':
+            latent, proposal_log_prob = proposal.sample(previous_latents=previous_latents_bar,
+                                                        observations=observations,
+                                                        time=0.1,
+                                                        batch_size=batch_size,
+                                                        num_particles=num_particles)
+        else:
+            proposal_dist = proposal(previous_latents=previous_latents_bar,
+                                     time=0.1, observations=observations)
+            latent = state.sample(proposal_dist, batch_size, num_particles)
+            proposal_log_prob = state.log_prob(proposal_dist, latent)
+        latents_bar = [latent]
+        if args.NF_dyn:
+            transition_log_prob = transition(latent, previous_latents_bar)
+        else:
+            transition_log_prob = state.log_prob(
+                transition(previous_latents=previous_latents_bar),latent)
+        if measurement == 'CRNVP':
+            encodings = emission.obs_encoder(observations[0])
+            emission_log_prob = emission(encodings, latent)
+        else:
+            emission_log_prob = state.log_prob(
+                emission(latents=latents_bar),state.expand_observation(observations[0], num_particles))
+
+        if return_original_latents or return_latents:
+            original_latents.append(latent)
+
+        log_weights.append(transition_log_prob + emission_log_prob -
+                           proposal_log_prob)
 
     for time in range(1, len(observations)):
         if inference_algorithm == 'smc':
@@ -236,15 +289,10 @@ def infer(mask, initial_states, inference_algorithm, observations, initial, tran
     diff = torch.sum(torch.stack(original_latents,dim=0)*normalized_particle_weights,
                      keepdim=True, dim=2)- ground_truth
     rmse_list = torch.sqrt(torch.sum(diff**2, dim=-1).mean(dim=(1, 2)))
-    loss_report = torch.sqrt(torch.sum(diff ** 2, dim=-1).mean())
     diff = diff.squeeze()
-    mask_expanded = mask.unsqueeze(-1).expand_as(diff)
-    diff = diff * mask_expanded
-    if mask.sum() != 0:
-        loss_rmse = torch.mean(torch.sum(diff ** 2, dim=-1))
-    else:
-        loss_rmse = torch.tensor(0).to(diff.device)
-    pseudo_loss = pseudolikelihood_loss(log_weights_list, emission_log_prob_list, index_list, transition_log_prob_list)
+    # mask = get_mask(diff, args.labelled_ratio)
+    loss_rmse = torch.sum(diff ** 2, dim=-1).mean()
+    loss_report = torch.sqrt(torch.sum(diff ** 2, dim=-1).mean())
 
     return {'log_marginal_likelihood': log_marginal_likelihood,
             'latents': latents,
@@ -254,7 +302,6 @@ def infer(mask, initial_states, inference_algorithm, observations, initial, tran
             'ancestral_indices': ancestral_indices,
             'last_latent': latent,
             'loss_rmse': loss_rmse,
-            'pseudo_loss': pseudo_loss,
             'loss_report': loss_report}, [latents_bar[-1].detach(), log_weights[-1].detach()], rmse_list
 
 def get_mask(diff, ratio):

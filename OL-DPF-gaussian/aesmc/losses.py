@@ -1,8 +1,8 @@
-import inference
+from . import inference
 import torch
 
 
-def get_loss(online_data, training_stage, observations, num_particles, algorithm, initial, transition,
+def get_loss(mask, initial_states, observations, num_particles, algorithm, initial, transition,
              emission, proposal, args=None, true_latents=None, measurement = 'Gaussian'):
     """Returns a differentiable loss for gradient descent.
 
@@ -47,11 +47,8 @@ def get_loss(online_data, training_stage, observations, num_particles, algorithm
     else:
         inference_algorithm = 'smc'
 
-    if training_stage == 'online':
-        online_learning = True
-    else:
-        online_learning = False
-    inference_result, data_pre_step, rmse_list = inference.infer(online_data=online_data,
+    inference_result, data_pre_step, rmse_list = inference.infer(mask=mask,
+                                                      initial_states=initial_states,
                                                       inference_algorithm=inference_algorithm,
                                                       observations=observations,
                                                       initial=initial,
@@ -67,20 +64,18 @@ def get_loss(online_data, training_stage, observations, num_particles, algorithm
                                                       return_ancestral_indices=False,
                                                       args = args,
                                                       true_latents= true_latents,
-                                                      online_learning=online_learning,
                                                       measurement=measurement)
     elbo = inference_result['log_marginal_likelihood']
     loss_rmse = inference_result['loss_rmse']
-    loss = -torch.mean(elbo)
+    loss = -1e-1*torch.mean(elbo)
+    loss_pl=1e-5*inference_result['pseudo_loss']
     # print(loss, loss_rmse)
-    if training_stage == 'offline':
-        return loss_rmse, data_pre_step, rmse_list, torch.mean(elbo), torch.sqrt(loss_rmse)
 
-    if args.trainType == 'pretrain':
-        return loss_rmse, data_pre_step, rmse_list, torch.mean(elbo), torch.sqrt(loss_rmse)
-    elif args.trainType == 'online':
-        return loss, data_pre_step, rmse_list, torch.mean(elbo), torch.sqrt(loss_rmse)
-    elif args.trainType == 'supervised':
-        return loss_rmse, data_pre_step, rmse_list, torch.mean(elbo), torch.sqrt(loss_rmse)
+    if args.trainType == 'dpf':
+        return loss_rmse, data_pre_step, rmse_list, torch.mean(elbo), inference_result['loss_report']
+    elif args.trainType == 'dpf_elbo':
+        return loss_rmse+loss, data_pre_step, rmse_list, torch.mean(elbo), inference_result['loss_report']
+    elif args.trainType == 'dpf_pl':
+        return loss_rmse+loss_pl, data_pre_step, rmse_list, torch.mean(elbo), inference_result['loss_report']
     else:
         raise ValueError('Please select an algorithm from different DPF.')

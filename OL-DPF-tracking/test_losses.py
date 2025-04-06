@@ -1,7 +1,4 @@
 import os
-abspath = os.path.abspath(__file__)
-dname = os.path.dirname(abspath)
-os.chdir(dname)
 import train
 import losses
 import matplotlib.pyplot as plt
@@ -10,8 +7,8 @@ import torch
 import random
 import torch.nn as nn
 import unittest
-import time
 from arguments import parse_args
+# from varname import nameof
 
 os.environ["KMP_DUPLICATE_LIB_OK"]="TRUE"
 
@@ -98,14 +95,99 @@ def generate_reshaped_data(batch_size, sequence_length, ts=1.0, p0=1.0, alpha=2.
     # Return data as a tuple
     return (state_list, observation_list)
 
+def find_min_max_in_states(state_list):
+    concatenated_states = np.concatenate(state_list, axis=0)
+    min_values = np.amin(concatenated_states, axis=0)
+    max_values = np.amax(concatenated_states, axis=0)
+    return min_values, max_values
 
+def sample_initial_particles(min_values, max_values, batch_size_online, num_particles, dim):
+    # Sample uniformly within the min-max range for each dimension
+    initial_particles = np.random.uniform(min_values, max_values, (batch_size_online, num_particles, dim))
+    return initial_particles
 
-class TestModels():
+def to_gpu_tensor(numpy_array):
+    # Convert numpy array to PyTorch tensor and transfer to GPU
+    return torch.tensor(numpy_array).float().to('cuda')
+
+class TestModels(unittest.TestCase):
+    def test_gaussian(self,args):
+        device = args.device
+        import gaussian
+
+        prior_std = 1
+
+        true_prior_mean = 0
+        true_obs_std = 1
+
+        prior_mean_init = 2
+        obs_std_init = 0.5
+
+        q_init_mult, q_init_bias, q_init_std = 2, 2, 2
+        q_true_mult, q_true_bias, q_true_std = gaussian.get_proposal_params(
+            true_prior_mean, prior_std, true_obs_std)
+
+        true_prior = gaussian.Prior(true_prior_mean, prior_std).to(device)
+        true_likelihood = gaussian.Likelihood(true_obs_std).to(device)
+
+        num_particles = 2
+        batch_size = 10
+        num_iterations = 2000
+
+        training_stats = gaussian.TrainingStats(logging_interval=500)
+
+        print('\nTraining the \"gaussian\" autoencoder.')
+        prior = gaussian.Prior(prior_mean_init, prior_std).to(device)
+        likelihood = gaussian.Likelihood(obs_std_init).to(device)
+        inference_network = gaussian.InferenceNetwork(
+            q_init_mult, q_init_bias, q_init_std).to(device)
+        train.train(dataloader=train.get_synthetic_dataloader(
+                        true_prior, None, true_likelihood, 1, batch_size),
+                    num_particles=num_particles,
+                    algorithm='iwae',
+                    initial=prior,
+                    transition=None,
+                    emission=likelihood,
+                    proposal=inference_network,
+                    num_epochs=1,
+                    num_iterations_per_epoch=num_iterations,
+                    optimizer_algorithm=torch.optim.SGD,
+                    optimizer_kwargs={'lr': 0.01},
+                    callback=training_stats, args = args)
+
+        fig, axs = plt.subplots(5, 1, sharex=True, sharey=True)
+        fig.set_size_inches(10, 8)
+
+        mean = training_stats.prior_mean_history
+        obs = training_stats.obs_std_history
+        mult = training_stats.q_mult_history
+        bias = training_stats.q_bias_history
+        std = training_stats.q_std_history
+        data = [mean] + [obs] + [mult] + [bias] + [std]
+        true = [true_prior_mean, true_obs_std, q_true_mult, q_true_bias,
+                q_true_std]
+
+        for ax, data_, true_, ylabel in zip(
+            axs, data, true, ['$\mu_0$', '$\sigma$', '$a$', '$b$', '$c$']
+        ):
+            ax.plot(training_stats.iteration_idx_history, data_)
+            ax.axhline(true_, color='black')
+            ax.set_ylabel(ylabel)
+            #  self.assertAlmostEqual(data[-1], true, delta=1e-1)
+
+        axs[-1].set_xlabel('Iteration')
+        fig.tight_layout()
+
+        filename = './test/test_autoencoder_plots/gaussian.pdf'
+        fig.savefig(filename, bbox_inches='tight')
+        print('\nPlot saved to {}'.format(filename))
+
     def test_lgssm(self,args):
         device = args.device
-
+        print('trainType:', args.trainType, 'labelled_ratio:', args.labelled_ratio)
         import lgssm
-
+        print('\nTraining the \"object tracking model\"'
+              ' autoencoder.')
         dim = 5
         obs_dim = 2
 
@@ -129,7 +211,7 @@ class TestModels():
             true_transition_mult_online2 = (0.7 * torch.ones(dim)).to(device).squeeze()
             init_transition_mult = (1.0 * torch.ones(dim)).to(device).squeeze()
 
-        transition_scale = torch.eye(dim).to(device).squeeze()*1000
+        transition_scale = torch.eye(dim).to(device).squeeze()
         true_emission_mult = (torch.ones(dim)).to(device).squeeze()
         true_emission_mult_online1 = (torch.ones(dim)).to(device).squeeze()
         true_emission_mult_online2 = (0.7 * torch.ones(dim)).to(device).squeeze()
@@ -151,15 +233,14 @@ class TestModels():
         logging_interval = 10
         batch_size = 10
         batch_size_online = 1
-        num_iterations = 8
-        num_iterations_val = 1
-        num_iterations_test = 1
+        num_iterations = 50
 
         num_particles = 100
-        num_experiments = args.num_exp
+        num_experiments = 50
         num_of_flows = [1]
+        labelled_ratio = 0.01
         flow_types = ['nvp']
-        lr = 0.002
+        lr = 0.005
         if args.NF_cond:
             algorithms =  ['cnf-dpf-'+flow_type+'-'+str(num_of_flows[i]) for i in range(len(num_of_flows)) for flow_type in flow_types] #+['aesmc']#['bootstrap']# ['pfrnn']#
         else:
@@ -198,10 +279,7 @@ class TestModels():
         # data_online = np.load('online_data.npz', allow_pickle=True)
         # state_online = data_online['states']
         # observation_online = data_online['observations']
-        folder_name = f"tracking_{dim}_lr_{lr}_type_{args.trainType}_label_ratio_{args.labelled_ratio}_num_iter_{num_iterations}_elbo_{args.elbo_ratio}_pl_{args.pl_ratio}_rmse_{args.rmse_ratio}"
-        folder_path = os.path.join("logs", folder_name)
-        os.makedirs(folder_path, exist_ok=True)
-        print(folder_name)
+
 
         for algorithm in algorithms:
             parameter_error_recorder, posterior_error_recorder, ESS_recorder = [], [], []
@@ -209,7 +287,7 @@ class TestModels():
             for i in range(num_experiments):
                 setup_seed(i)
 
-                state_offline, observation_offline = generate_reshaped_data(batch_size=num_iterations*batch_size, sequence_length=100, ts=5.0,
+                state_offline, observation_offline = generate_reshaped_data(batch_size=500, sequence_length=50, ts=5.0,
                                                                             p0=1.0, alpha=2.0, r=np.array([2.0, 2.0]),
                                                                             state_noise_mean=0.0,
                                                                             state_noise_scale=0.01,
@@ -219,17 +297,16 @@ class TestModels():
                                                                             observation_noise_scale1=0.4,
                                                                             observation_noise_scale2=0.25, a_t=5)
 
-                min_values, max_values, normalising_value = train.find_min_max_in_states(state_offline)
-                normalising_value=train.to_gpu_tensor(normalising_value)
-                initial_particles = train.sample_initial_particles(min_values, max_values, batch_size, num_particles,
+                min_values, max_values = find_min_max_in_states(state_offline)
+                initial_particles = sample_initial_particles(min_values, max_values, batch_size, num_particles,
                                                              dim)
-                initial_particles = train.to_gpu_tensor(initial_particles)
+                initial_particles = to_gpu_tensor(initial_particles)
 
                 # state_offline, observation_offline = np.array(state_offline), np.array(observation_offline)
                 state_offline_tensors = [torch.tensor(s).float().to('cuda') for s in state_offline]
                 observation_offline_tensors = [torch.tensor(o).float().to('cuda') for o in observation_offline]
 
-                state_val, observation_val = generate_reshaped_data(batch_size=10, sequence_length=100, ts=5.0,
+                state_online, observation_online = generate_reshaped_data(batch_size=1, sequence_length=5000, ts=5.0,
                                                                           p0=1.0,
                                                                           alpha=2.0, r=np.array([2.0, 2.0]),
                                                                           state_noise_mean=0.0, state_noise_scale=0.01,
@@ -237,21 +314,9 @@ class TestModels():
                                                                           turn_rate_noise_scale=0.0001,
                                                                           observation_noise_mean=0.0,
                                                                           observation_noise_scale1=0.4,
-                                                                          observation_noise_scale2=0.25, a_t=5)
-                state_val_tensors = [torch.tensor(s).float().to('cuda') for s in state_val]
-                observation_val_tensors = [torch.tensor(o).float().to('cuda') for o in observation_val]
-
-                state_test, observation_test = generate_reshaped_data(batch_size=10, sequence_length=100, ts=5.0,
-                                                                          p0=1.0,
-                                                                          alpha=2.0, r=np.array([2.0, 2.0]),
-                                                                          state_noise_mean=0.0, state_noise_scale=0.01,
-                                                                          turn_rate_noise_mean=0.0,
-                                                                          turn_rate_noise_scale=0.0001,
-                                                                          observation_noise_mean=0.0,
-                                                                          observation_noise_scale1=0.4,
-                                                                          observation_noise_scale2=0.25, a_t=5)
-                state_test_tensors = [torch.tensor(s).float().to('cuda') for s in state_test]
-                observation_test_tensors = [torch.tensor(o).float().to('cuda') for o in observation_test]
+                                                                          observation_noise_scale2=0.25, a_t=-5)
+                state_online_tensors = [torch.tensor(s).float().to('cuda') for s in state_online]
+                observation_online_tensors = [torch.tensor(o).float().to('cuda') for o in observation_online]
 
                 dataloader = train.get_synthetic_dataloader_offline_position(
                     lgssm.Initial(initial_loc, initial_scale).to(device),
@@ -259,23 +324,11 @@ class TestModels():
                     lgssm.Emission(true_emission_mult, emission_scale).to(device),
                     num_timesteps, batch_size, state_offline_tensors, observation_offline_tensors)
 
-                dataloader_val = train.get_synthetic_dataloader_offline_position(
+                dataloader_online1 = train.get_synthetic_dataloader_online_position(
                     lgssm.Initial(initial_loc, initial_scale).to(device),
-                    lgssm.Transition(true_transition_mult, transition_scale).to(device),
-                    lgssm.Emission(true_emission_mult, emission_scale).to(device),
-                    num_timesteps, batch_size, state_val_tensors, observation_val_tensors)
-
-                dataloader_test = train.get_synthetic_dataloader_offline_position(
-                    lgssm.Initial(initial_loc, initial_scale).to(device),
-                    lgssm.Transition(true_transition_mult, transition_scale).to(device),
-                    lgssm.Emission(true_emission_mult, emission_scale).to(device),
-                    num_timesteps, batch_size, state_test_tensors, observation_test_tensors)
-
-                # dataloader_online1 = train.get_synthetic_dataloader_online_position(
-                #     lgssm.Initial(initial_loc, initial_scale).to(device),
-                #     lgssm.Transition(true_transition_mult_online1, transition_scale).to(device),
-                #     lgssm.Emission(true_emission_mult_online1, emission_scale).to(device),
-                #     num_timesteps_online, batch_size_online, state_online_tensors, observation_online_tensors, total_timesteps=total_timestep_online)
+                    lgssm.Transition(true_transition_mult_online1, transition_scale).to(device),
+                    lgssm.Emission(true_emission_mult_online1, emission_scale).to(device),
+                    num_timesteps_online, batch_size_online, state_online_tensors, observation_online_tensors, total_timesteps=total_timestep_online)
 
                 training_stats = lgssm.TrainingStats(
                     true_transition_mult_online1, true_emission_mult_online1, true_transition_mult_online2, true_emission_mult_online2, initial_loc, initial_scale, true_transition_mult,
@@ -285,7 +338,7 @@ class TestModels():
                 Initial_dist = lgssm.Initial(initial_loc, initial_scale).to(device)
                 if args.NF_dyn:
                     n_sequence, hidden_size, init_var = 1, dim, 0.01
-                    dyn_nf = lgssm.build_dyn_nf(n_sequence, hidden_size, dim, init_var = init_var, translate=False, type=flow_types[0])
+                    dyn_nf = lgssm.build_dyn_nf(n_sequence, hidden_size, dim, init_var = init_var, translate=True, type=flow_types[0])
                     prototype_transition = lgssm.Transition(torch.ones_like(init_transition_mult).detach().clone(),
                                                             transition_scale.detach().clone()).to(device)
                     Transition_dist = lgssm.Dynamic_cnf(dyn_nf=dyn_nf,prototype_transition=prototype_transition,
@@ -352,11 +405,9 @@ class TestModels():
                                                   type='bootstrap').to(device)
                 else:
                     raise ValueError('Please select an algorithm from {aesmc, cnf-dpf, bootstrap}.')
-                rmse_plot, elbo_plot, rmse_box_plot = train.train(normalising_value=normalising_value,
-                            saving_folder=folder_path,
-                            initial_state=initial_particles,
-                            dataloader_val=dataloader_val,
-                            dataloader_test=dataloader_test,
+                rmse_plot, elbo_plot, rmse_box_plot = train.train(initial_state=initial_particles,
+                            dataloader_online1=dataloader_online1,
+                            dataloader_online2=dataloader_online2,
                             dataloader=dataloader,
                             num_particles=num_particles,
                             algorithm=algorithm,
@@ -365,7 +416,7 @@ class TestModels():
                             emission=Emission_dist,
                             # proposal=lgssm.Proposal(optimal_proposal_scale_0,optimal_proposal_scale_t, device).to(device),
                             proposal = proposal,
-                            num_epochs=args.num_epochs,
+                            num_epochs=1,
                             num_iterations_per_epoch=num_iterations,
                             num_iterations_per_epoch_online=num_iterations_online,
                             optimizer_algorithm=torch.optim.AdamW,
@@ -394,23 +445,104 @@ class TestModels():
             elbo_recorder = np.array(elbo_recorder)
             all_loss_recorder = np.array(all_loss_recorder)
 
-            # folder_name = f"tracking_{dim}_lr_{lr}_type_{args.trainType}_label_ratio_{args.labelled_ratio}"
-            # folder_path = os.path.join("logs", folder_name)
-            # os.makedirs(folder_path, exist_ok=True)
+            folder_name = f"dim_{dim}_lr_{lr}_type_{args.trainType}"
+            folder_path = os.path.join("logs", folder_name)
+            os.makedirs(folder_path, exist_ok=True)
             np.savez(os.path.join(folder_path, "results.npz"),
                      rmse_recorder=rmse_recorder,
                      elbo_recorder=elbo_recorder,
                      all_loss_recorder=all_loss_recorder)
 
+            # training_stats.iteration_idx_history = np.array(training_stats.iteration_idx_history)+1
+            # axs[0,0].plot(training_stats.iteration_idx_history,
+            #               parameter_error_recorder.mean(0),
+            #               label=algorithm,
+            #               color=colors[algorithm])
+            # axs[0,0].scatter(training_stats.iteration_idx_history[::5],
+            #                  parameter_error_recorder.mean(0)[::5],
+            #                  color=colors[algorithm],
+            #                  marker=markers[algorithm],
+            #                  s=marker_size)
+            # axs[0,0].fill_between(training_stats.iteration_idx_history,
+            #                     parameter_error_recorder.mean(0) - parameter_error_recorder.std(0)*0.3,
+            #                     parameter_error_recorder.mean(0) + parameter_error_recorder.std(0)*0.3,
+            #                     color=colors[algorithm],
+            #                     alpha=0.3)
+            # axs[1,0].plot(training_stats.iteration_idx_history,
+            #               elbo_recorder.mean(0),
+            #               label=algorithm,
+            #               color=colors[algorithm])
+            # axs[1,0].scatter(training_stats.iteration_idx_history[::5],
+            #                  elbo_recorder.mean(0)[::5],
+            #                  color=colors[algorithm],
+            #                  marker=markers[algorithm],
+            #                  s=marker_size)
+            # axs[1,0].fill_between(training_stats.iteration_idx_history,
+            #                     elbo_recorder.mean(0) - elbo_recorder.std(0)*0.3,
+            #                     elbo_recorder.mean(0) + elbo_recorder.std(0)*0.3,
+            #                     color=colors[algorithm],
+            #                     alpha=0.3)
+            # axs[1,1].plot(np.arange(num_timesteps),
+            #               ESS_recorder[:, -1].mean(0),
+            #               label=algorithm,
+            #               color=colors[algorithm])
+            # axs[1,1].scatter(np.arange(num_timesteps)[::5],
+            #                  ESS_recorder[:, -1].mean(0)[::5],
+            #                  color=colors[algorithm],
+            #                  marker=markers[algorithm],
+            #                  s=marker_size)
+            # axs[1,1].fill_between(np.arange(num_timesteps),
+            #                     ESS_recorder[:,-1].mean(0) - ESS_recorder[:,-1].std(0)*0.3,
+            #                     ESS_recorder[:,-1].mean(0) + ESS_recorder[:,-1].std(0)*0.3,
+            #                     color=colors[algorithm],
+            #                     alpha=0.3)
+        #     data_list = [parameter_error_recorder,
+        #                  posterior_error_recorder,
+        #                  elbo_recorder,
+        #                  ESS_recorder]
+        #     data_name_list = ['parameter_error_recorder',
+        #                       'posterior_error_recorder',
+        #                       'elbo_recorder',
+        #                       'ESS_recorder']
+        #     save_data(num_timesteps_online, data_list, data_name_list, algorithm, lr, num_experiments, num_iterations, dim, args.labelled_ratio, args.trainType)
+        #
+        #     loss_rmse_test = training_stats(-1, -1, -1, initial=Initial_dist,
+        #                                                           transition=Transition_dist, emission=Emission_dist,
+        #                                                           proposal=proposal, test=True, args=args)
+        #     data_list_test = [
+        #                       loss_rmse_test]
+        #     data_name_list_test = [
+        #                            'loss_rmse_test']
+        #     save_data(num_timesteps_online, data_list_test, data_name_list_test, algorithm, lr, num_experiments, num_iterations, dim,
+        #               args.labelled_ratio,
+        #               args.trainType)
+        #
+        # axs[0,0].set_ylabel('$||\\theta - \\theta_{true}||$')
+        # axs[0, 0].set_xticks([1]+[i for i in np.arange((num_iterations+1)//5, num_iterations+1, (num_iterations+1)//5)])
+        # axs[0,1].set_ylabel('Avg. L2 of\nmarginal posterior means')
+        # axs[0, 1].set_xticks([1] + [i for i in np.arange((num_iterations+1)//5, num_iterations + 1, (num_iterations+1)//5)])
+        # axs[1,0].set_ylabel('ELBO')
+        # axs[1, 0].set_xticks([1] + [i for i in np.arange((num_iterations+1)//5, num_iterations + 1, (num_iterations+1)//5)])
+        # axs[1,1].set_ylabel('ESS')
+        # axs[0,0].set_xlabel('Iteration')
+        # axs[0,1].set_xlabel('Iteration')
+        # axs[1,0].set_xlabel('Iteration')
+        # axs[1,1].set_xlabel('Step')
+        # axs[0,0].legend()
+        #
+        # for ax in axs:
+        #     for x in ax:
+        #         x.grid(alpha=0.5)
+        # fig.tight_layout()
+        # filename = './test_autoencoder_plots/lgssm_elbo.pdf'
+        # fig.savefig(filename, bbox_inches='tight')
+        # print('\nPlot saved to {}'.format(filename))
 
+
+        self.assertTrue(True)
 
 
 if __name__ == '__main__':
-    start_time = time.time()
     args = parse_args()
     # print(os.getcwd())
     main(args)
-    end_time = time.time()
-    elapsed_time = end_time - start_time
-    formatted_elapsed_time = "{:.2f}".format(elapsed_time)
-    print(f"The process took {formatted_elapsed_time} seconds to complete.")
